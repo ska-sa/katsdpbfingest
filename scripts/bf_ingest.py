@@ -24,13 +24,16 @@ _logger = logging.getLogger('')
 
 
 class CaptureSession(object):
-    def __init__(self, endpoint, loop):
+    def __init__(self, endpoint, cbf_channels, loop):
         self._loop = loop
         self._file = None
         self._bf_raw_dataset = None
         self._timestamp_dataset = None
         self._manual_stop = False
-        self._timestep = None
+        if cbf_channels:
+            self._timestep = 2 * cbf_channels
+        else:
+            self._timestep = None
         self._ig = spead2.ItemGroup()
         _logger.info('Listening on endpoint {}'.format(endpoint))
         self._stream = spead2.recv.trollius.Stream(spead2.ThreadPool(), 0, loop=self._loop)
@@ -49,7 +52,9 @@ class CaptureSession(object):
         self._bf_raw_dataset = data_group.create_dataset(
             'bf_raw', shape, maxshape=maxshape, dtype=dtype, chunks=(n_time, n_chans, 2))
         self._timestamp_dataset = data_group.create_dataset('timestamp', (0,), maxshape=(None,), dtype=np.uint64)
-        self._timestep = 2 * n_chans
+        if self._timestep is None:
+            _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
+            self._timestep = 2 * n_chans
 
     def _process_heap(self, heap):
         updated = self._ig.update(heap)
@@ -112,6 +117,7 @@ class CaptureServer(katcp.DeviceServer):
 
     def __init__(self, args, loop):
         super(CaptureServer, self).__init__(args.host, args.port)
+        self._cbf_channels = args.cbf_channels
         self._endpoint = args.endpoint
         self._loop = loop
         self._capture = None
@@ -125,7 +131,7 @@ class CaptureServer(katcp.DeviceServer):
         """Start capture to file"""
         if self._capture is not None:
             return ('fail', 'already capturing')
-        self._capture = CaptureSession(self._endpoint, self._loop)
+        self._capture = CaptureSession(self._endpoint, self._cbf_channels, self._loop)
         return ('ok',)
 
     @tornado.gen.coroutine
@@ -162,6 +168,7 @@ def main():
     parser = katsdptelstate.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
+    parser.add_argument('--cbf-channels', type=int, help='total number of PFB channels [defaults to number of channels in stream]')
     parser.add_argument('--logging', '-l', type=str, metavar='LEVEL', default='INFO', help='log level')
     parser.add_argument('endpoint', type=katsdptelstate.endpoint.endpoint_parser(7148), help='Multicast group and port')
     args = parser.parse_args()
