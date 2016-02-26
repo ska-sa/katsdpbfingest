@@ -7,6 +7,8 @@ import spead2.recv.trollius
 import katcp
 from katcp.kattypes import request, return_reply
 import h5py
+import numpy as np
+import time
 import signal
 import trollius
 import tornado
@@ -25,20 +27,58 @@ class CaptureSession(object):
     def __init__(self, endpoint, loop):
         self._loop = loop
         self._file = None
+        self._bf_raw_dataset = None
+        self._timestamp_dataset = None
         self._manual_stop = False
+        self._timestep = None
         self._ig = spead2.ItemGroup()
         _logger.info('Listening on endpoint {}'.format(endpoint))
         self._stream = spead2.recv.trollius.Stream(spead2.ThreadPool(), 0, loop=self._loop)
         self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host)
         self._run_future = trollius.async(self._run(), loop=self._loop)
 
+    def _create_file(self):
+        filename = '{}.h5'.format(int(time.time()))
+        self._file = h5py.File(filename, mode='w')
+        self._file.attrs['version'] = 1
+        data_group = self._file.create_group('Data')
+        n_chans, n_time = self._ig['bf_raw'].shape[0:2]
+        dtype = self._ig['bf_raw'].dtype
+        shape = (0, n_chans, 2)
+        maxshape = (None, n_chans, 2)
+        self._bf_raw_dataset = data_group.create_dataset(
+            'bf_raw', shape, maxshape=maxshape, dtype=dtype, chunks=(n_time, n_chans, 2))
+        self._timestamp_dataset = data_group.create_dataset('timestamp', (0,), maxshape=(None,), dtype=np.uint64)
+        self._timestep = 2 * n_chans
+
     def _process_heap(self, heap):
         updated = self._ig.update(heap)
-        if 'timestamp' in updated:
-            timestamp = self._ig['timestamp'].value
-            _logger.info('Received heap with timestamp %d', timestamp)
-            if not self._file:
-                self._file = h5py.File(str(timestamp) + '.h5')
+        is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
+        if (not self._file
+            and (heap.is_start_of_stream() or is_data_heap)
+            and 'bf_raw' in self._ig):
+            self._create_file()
+        if not is_data_heap:
+            _logger.info('Received non-data heap %d', heap.cnt)
+            return
+        timestamp = self._ig['timestamp'].value
+        bf_raw = self._ig['bf_raw'].value
+        _logger.info('Received heap with timestamp %d', timestamp)
+
+        n_chans, n_time = bf_raw.shape[0:2]
+        if n_chans != self._bf_raw_dataset.shape[1]:
+            _logger.warning('Dropping heap because number of channels does not match')
+            return
+        idx = self._bf_raw_dataset.shape[0]
+        self._bf_raw_dataset.resize(idx + n_time, axis=0)
+        self._timestamp_dataset.resize(idx + n_time, axis=0)
+        # bf_raw is in channel-time-component order; we want time-channel-component
+        self._bf_raw_dataset[idx : idx + n_time, ...] = bf_raw.swapaxes(0, 1)
+        timestamps = np.arange(timestamp,
+                               timestamp + self._timestep * n_time,
+                               self._timestep,
+                               dtype=np.uint64)
+        self._timestamp_dataset[idx : idx + n_time] = timestamps
 
     @trollius.coroutine
     def _run(self):
