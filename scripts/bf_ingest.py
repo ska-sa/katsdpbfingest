@@ -24,6 +24,20 @@ import katversion
 _logger = logging.getLogger('')
 
 
+def _make_fapl(cache_entries, cache_size, w0):
+    """Create a File Access Properties List for h5py with a specified number
+    of cache entries and cache size. This is based around the internal
+    make_fapl function in h5py.
+    """
+
+    fapl = h5py.h5p.create(h5py.h5p.FILE_ACCESS)
+    cache_settings = list(fapl.get_cache())
+    fapl.set_cache(cache_settings[0], cache_entries, cache_size, w0)
+    fapl.set_fclose_degree(h5py.h5f.CLOSE_STRONG)
+    fapl.set_libver_bounds(h5py.h5f.LIBVER_LATEST, h5py.h5f.LIBVER_LATEST)
+    return fapl
+
+
 class CaptureSession(object):
     def __init__(self, args, loop):
         self._loop = loop
@@ -45,11 +59,16 @@ class CaptureSession(object):
 
     def _create_file(self):
         filename = os.path.join(self._args.file_base, '{}.h5'.format(int(time.time())))
+        # Allocate enough cache space for 3 chunks - should be enough for one active, one
+        # being written back, and a bit extra for timestamps.
+        n_chans, n_time = self._ig['bf_raw'].shape[0:2]
+        dtype = self._ig['bf_raw'].dtype
+        cache_size = 4 * n_time * n_chans * 2 * dtype.itemsize
+        # HDF5 recommendation is for ~100 slots per chunk, and a prime number
+        fapl = _make_fapl(401, cache_size, 0.99)
         self._file = h5py.File(filename, mode='w')
         self._file.attrs['version'] = 1
         data_group = self._file.create_group('Data')
-        n_chans, n_time = self._ig['bf_raw'].shape[0:2]
-        dtype = self._ig['bf_raw'].dtype
         shape = (0, n_chans, 2)
         maxshape = (None, n_chans, 2)
         self._bf_raw_dataset = data_group.create_dataset(
