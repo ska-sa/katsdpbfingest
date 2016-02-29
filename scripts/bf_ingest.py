@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 import time
 import signal
+import os.path
 import trollius
 import tornado
 from tornado.platform.asyncio import AsyncIOMainLoop, to_asyncio_future
@@ -24,24 +25,26 @@ _logger = logging.getLogger('')
 
 
 class CaptureSession(object):
-    def __init__(self, endpoint, cbf_channels, loop):
+    def __init__(self, args, loop):
         self._loop = loop
+        self._args = args
         self._file = None
         self._bf_raw_dataset = None
         self._timestamp_dataset = None
         self._manual_stop = False
-        if cbf_channels:
-            self._timestep = 2 * cbf_channels
+        if args.cbf_channels:
+            self._timestep = 2 * args.cbf_channels
         else:
             self._timestep = None
         self._ig = spead2.ItemGroup()
-        _logger.info('Listening on endpoint {}'.format(endpoint))
         self._stream = spead2.recv.trollius.Stream(spead2.ThreadPool(), 0, loop=self._loop)
-        self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host)
+        for endpoint in args.cbf_spead:
+            _logger.info('Listening on endpoint {}'.format(endpoint))
+            self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host)
         self._run_future = trollius.async(self._run(), loop=self._loop)
 
     def _create_file(self):
-        filename = '{}.h5'.format(int(time.time()))
+        filename = os.path.join(self._args.file_base, '{}.h5'.format(int(time.time())))
         self._file = h5py.File(filename, mode='w')
         self._file.attrs['version'] = 1
         data_group = self._file.create_group('Data')
@@ -117,8 +120,7 @@ class CaptureServer(katcp.DeviceServer):
 
     def __init__(self, args, loop):
         super(CaptureServer, self).__init__(args.host, args.port)
-        self._cbf_channels = args.cbf_channels
-        self._endpoint = args.endpoint
+        self._args = args
         self._loop = loop
         self._capture = None
 
@@ -131,7 +133,7 @@ class CaptureServer(katcp.DeviceServer):
         """Start capture to file"""
         if self._capture is not None:
             return ('fail', 'already capturing')
-        self._capture = CaptureSession(self._endpoint, self._cbf_channels, self._loop)
+        self._capture = CaptureSession(self._args, self._loop)
         return ('ok',)
 
     @tornado.gen.coroutine
@@ -166,11 +168,12 @@ def on_shutdown(server):
 
 def main():
     parser = katsdptelstate.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--cbf-channels', type=int, help='total number of PFB channels [defaults to number of channels in stream]')
+    parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), default=':7148', help='endpoints to listen for CBF SPEAD stream (including multicast IPs). [<ip>[+<count>]][:port].', metavar='ENDPOINTS')
+    parser.add_argument('--logging', '-l', type=str, metavar='LEVEL', default='INFO', help='log level')
+    parser.add_argument('--file-base', default='.', type=str, help='base directory into which to write HDF5 files', metavar='DIR')
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
-    parser.add_argument('--cbf-channels', type=int, help='total number of PFB channels [defaults to number of channels in stream]')
-    parser.add_argument('--logging', '-l', type=str, metavar='LEVEL', default='INFO', help='log level')
-    parser.add_argument('endpoint', type=katsdptelstate.endpoint.endpoint_parser(7148), help='Multicast group and port')
     args = parser.parse_args()
     logging.basicConfig(level=args.logging, format='%(asctime)s %(levelname)s:%(name)s: %(message)s')
 
