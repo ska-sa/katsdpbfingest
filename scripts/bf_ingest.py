@@ -38,6 +38,20 @@ def _make_fapl(cache_entries, cache_size, w0):
     return fapl
 
 
+def _transpose2(a, out=None):
+    """Transpose a 2D array of complex numbers, represented as a 3D array with
+    the last dimension being of size 2. This is written in a rather nasty way
+    in order to hit a fast path in numpy, giving about 5-10 times speedup over
+    just using np.swapaxes.
+    """
+    view_dtype = np.dtype(a.dtype, (2,))
+    if out is None:
+        out = np.empty((a.shape[1], a.shape[0], 2), a.dtype)
+    a_view = a.view(view_dtype)[:, :, 0]
+    out_view = out.view(view_dtype)[:, :, 0]
+    out_view[:] = a_view.T
+
+
 class CaptureSession(object):
     def __init__(self, args, loop):
         self._loop = loop
@@ -45,6 +59,7 @@ class CaptureSession(object):
         self._file = None
         self._bf_raw_dataset = None
         self._timestamp_dataset = None
+        self._transposed = None
         self._manual_stop = False
         if args.cbf_channels:
             self._timestep = 2 * args.cbf_channels
@@ -77,6 +92,7 @@ class CaptureSession(object):
         if self._timestep is None:
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
+        self._transposed = np.empty((n_time, n_chans, 2), dtype)
 
     def _process_heap(self, heap):
         updated = self._ig.update(heap)
@@ -100,7 +116,8 @@ class CaptureSession(object):
         self._bf_raw_dataset.resize(idx + n_time, axis=0)
         self._timestamp_dataset.resize(idx + n_time, axis=0)
         # bf_raw is in channel-time-component order; we want time-channel-component
-        self._bf_raw_dataset[idx : idx + n_time, ...] = bf_raw.swapaxes(0, 1)
+        _transpose2(bf_raw, self._transposed)
+        self._bf_raw_dataset[idx : idx + n_time, ...] = self._transposed
         timestamps = np.arange(timestamp,
                                timestamp + self._timestep * n_time,
                                self._timestep,
