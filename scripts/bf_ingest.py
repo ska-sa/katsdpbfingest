@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 import time
 import signal
+import os
 import os.path
 import trollius
 import tornado
@@ -81,6 +82,7 @@ class CaptureSession(object):
     @trollius.coroutine
     def _run(self):
         try:
+            data_heaps = 0
             while True:
                 heap = yield From(self._stream.get())
                 updated = self._ig.update(heap)
@@ -94,7 +96,7 @@ class CaptureSession(object):
                     continue
                 timestamp = self._ig['timestamp'].value
                 bf_raw = self._ig['bf_raw'].value
-                _logger.info('Received heap with timestamp %d', timestamp)
+                _logger.debug('Received heap with timestamp %d', timestamp)
 
                 n_chans, n_time = bf_raw.shape[0:2]
                 if n_chans != self._bf_raw_dataset.shape[0]:
@@ -109,6 +111,15 @@ class CaptureSession(object):
                                        self._timestep,
                                        dtype=np.uint64)
                 self._timestamp_dataset[idx : idx + n_time] = timestamps
+                data_heaps += 1
+                # Check free space periodically, but every heap is excessive
+                if data_heaps % 100 == 0:
+                    _logger.info('Received %d data heaps', data_heaps)
+                    stat = os.statvfs(self._file.filename)
+                    free_bytes = stat.f_frsize * stat.f_bavail
+                    if free_bytes < 300 * bf_raw.nbytes:
+                        _logger.warn('Capture stopped due to lack of disk space')
+                        break
         except spead2.Stopped:
             if self._manual_stop:
                 _logger.info('Capture terminated by request')
@@ -120,6 +131,7 @@ class CaptureSession(object):
             if self._file:
                 self._file.close()
                 self._file = None
+            self._stream.stop()
 
     @trollius.coroutine
     def stop(self):
