@@ -78,40 +78,37 @@ class CaptureSession(object):
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
 
-    def _process_heap(self, heap):
-        updated = self._ig.update(heap)
-        is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
-        if (not self._file
-            and (heap.is_start_of_stream() or is_data_heap)
-            and 'bf_raw' in self._ig):
-            self._create_file()
-        if not is_data_heap:
-            _logger.info('Received non-data heap %d', heap.cnt)
-            return
-        timestamp = self._ig['timestamp'].value
-        bf_raw = self._ig['bf_raw'].value
-        _logger.info('Received heap with timestamp %d', timestamp)
-
-        n_chans, n_time = bf_raw.shape[0:2]
-        if n_chans != self._bf_raw_dataset.shape[0]:
-            _logger.warning('Dropping heap because number of channels does not match')
-            return
-        idx = self._bf_raw_dataset.shape[1]
-        self._bf_raw_dataset.resize(idx + n_time, axis=1)
-        self._timestamp_dataset.resize(idx + n_time, axis=0)
-        self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
-        timestamps = np.arange(timestamp,
-                               timestamp + self._timestep * n_time,
-                               self._timestep,
-                               dtype=np.uint64)
-        self._timestamp_dataset[idx : idx + n_time] = timestamps
-
     @trollius.coroutine
     def _run(self):
         try:
             while True:
                 heap = yield From(self._stream.get())
-                self._process_heap(heap)
+                updated = self._ig.update(heap)
+                is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
+                if (not self._file
+                    and (heap.is_start_of_stream() or is_data_heap)
+                    and 'bf_raw' in self._ig):
+                    self._create_file()
+                if not is_data_heap:
+                    _logger.info('Received non-data heap %d', heap.cnt)
+                    continue
+                timestamp = self._ig['timestamp'].value
+                bf_raw = self._ig['bf_raw'].value
+                _logger.info('Received heap with timestamp %d', timestamp)
+
+                n_chans, n_time = bf_raw.shape[0:2]
+                if n_chans != self._bf_raw_dataset.shape[0]:
+                    _logger.warning('Dropping heap because number of channels does not match')
+                    continue
+                idx = self._bf_raw_dataset.shape[1]
+                self._bf_raw_dataset.resize(idx + n_time, axis=1)
+                self._timestamp_dataset.resize(idx + n_time, axis=0)
+                self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
+                timestamps = np.arange(timestamp,
+                                       timestamp + self._timestep * n_time,
+                                       self._timestep,
+                                       dtype=np.uint64)
+                self._timestamp_dataset[idx : idx + n_time] = timestamps
         except spead2.Stopped:
             if self._manual_stop:
                 _logger.info('Capture terminated by request')
