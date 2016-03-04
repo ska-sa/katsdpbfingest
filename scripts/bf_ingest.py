@@ -31,7 +31,7 @@ class CaptureSession(object):
         self._args = args
         self._file = None
         self._bf_raw_dataset = None
-        self._timestamp_dataset = None
+        self._timestamps = []
         self._manual_stop = False
         if args.cbf_channels:
             self._timestep = 2 * args.cbf_channels
@@ -58,7 +58,6 @@ class CaptureSession(object):
         maxshape = (n_chans, None, 2)
         self._bf_raw_dataset = data_group.create_dataset(
             'bf_raw', shape, maxshape=maxshape, dtype=dtype, chunks=(n_chans, n_time, 2))
-        self._timestamp_dataset = data_group.create_dataset('timestamp', (0,), maxshape=(None,), dtype=np.uint64)
         if self._timestep is None:
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
@@ -88,20 +87,15 @@ class CaptureSession(object):
                     continue
                 idx = self._bf_raw_dataset.shape[1]
                 self._bf_raw_dataset.resize(idx + n_time, axis=1)
-                self._timestamp_dataset.resize(idx + n_time, axis=0)
                 self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
-                timestamps = np.arange(timestamp,
-                                       timestamp + self._timestep * n_time,
-                                       self._timestep,
-                                       dtype=np.uint64)
-                self._timestamp_dataset[idx : idx + n_time] = timestamps
+                self._timestamps.append(timestamp)
                 data_heaps += 1
                 # Check free space periodically, but every heap is excessive
                 if data_heaps % 100 == 0:
                     _logger.info('Received %d data heaps', data_heaps)
                     stat = os.statvfs(self._file.filename)
                     free_bytes = stat.f_frsize * stat.f_bavail
-                    if free_bytes < 300 * bf_raw.nbytes:
+                    if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * data_heaps:
                         _logger.warn('Capture stopped due to lack of disk space')
                         break
         except spead2.Stopped:
@@ -112,10 +106,21 @@ class CaptureSession(object):
         except Exception:
             _logger.error('Capture coroutine threw uncaught exception', exc_info=True)
         finally:
+            self._stream.stop()
             if self._file:
+                n_time = self._ig['bf_raw'].shape[1]
+                ds = self._file['Data'].create_dataset(
+                    'timestamp',
+                    shape=(n_time * len(self._timestamps),),
+                    dtype=np.uint64)
+                idx = 0
+                for timestamp in self._timestamps:
+                    ds[idx : idx + n_time] = np.arange(
+                        timestamp, timestamp + n_time * self._timestep, self._timestep,
+                        dtype=np.uint64)
+                    idx += n_time
                 self._file.close()
                 self._file = None
-            self._stream.stop()
 
     @trollius.coroutine
     def stop(self):
