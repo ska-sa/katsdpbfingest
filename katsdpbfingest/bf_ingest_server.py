@@ -13,7 +13,7 @@ import trollius
 from trollius import From, Return
 import tornado
 import logging
-import katversion
+import katsdpingest
 
 
 _logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ class _CaptureSession(object):
 class CaptureServer(katcp.DeviceServer):
     """katcp device server for beamformer simulation"""
     VERSION_INFO = ('bf-ingest', 1, 0)
-    BUILD_INFO = ('katsdpingest',) + tuple(katversion.get_version(__file__).split('.', 1)) + ('',)
+    BUILD_INFO = ('katsdpingest',) + tuple(katsdpingest.__version__.split('.', 1)) + ('',)
 
     def __init__(self, args, loop):
         super(CaptureServer, self).__init__(args.host, args.port)
