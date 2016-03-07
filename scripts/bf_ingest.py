@@ -34,10 +34,10 @@ def main():
     server = CaptureServer(args, trollius.get_event_loop())
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)
-    trollius.get_event_loop().add_signal_handler(signal.SIGINT,
-        lambda: trollius.async(on_shutdown(server)))
-    trollius.get_event_loop().add_signal_handler(signal.SIGTERM,
-        lambda: trollius.async(on_shutdown(server)))
+    trollius.get_event_loop().add_signal_handler(
+        signal.SIGINT, lambda: trollius.async(on_shutdown(server)))
+    trollius.get_event_loop().add_signal_handler(
+        signal.SIGTERM, lambda: trollius.async(on_shutdown(server)))
     ioloop.add_callback(server.start)
     trollius.get_event_loop().run_forever()
 

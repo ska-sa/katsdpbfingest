@@ -10,7 +10,7 @@ import time
 import os
 import os.path
 import trollius
-from trollius import From, Return
+from trollius import From
 import tornado
 import logging
 import katsdpingest
@@ -20,6 +20,39 @@ _logger = logging.getLogger(__name__)
 
 
 class _CaptureSession(object):
+    """Object encapsulating a co-routine that runs for a single capture session
+    (from ``capture-init`` to end of stream or ``capture-done``.
+
+    Parameters
+    ----------
+    args : :class:`argparse.Namespace`
+        Command-line arguments. See :class:`CaptureServer`.
+    loop : :class:`trollius.BaseEventLoop`
+        IO Loop for the coroutine
+
+    Attributes
+    ----------
+    _args : :class:`argparse.Namespace`
+        Command-line arguments passed to the constructor
+    _loop : :class:`trollius.BaseEventLoop`
+        Event loop passed to the constructor
+    _file : :class:`h5py.File`
+        Handle to HDF5 file
+    _bf_raw_dataset : :class:`h5py.Dataset`
+        Handle to the ``bf_raw`` dataset
+    _timestamps : :class:`list`
+        Timestamp for the start of each heap
+    _manual_stop : :class:`bool`
+        Whether :meth:`stop` has been called
+    _ig : :class:`spead2.ItemGroup`
+        Item group updated with each heap
+    _stream : :class:`spead2.recv.trollius.Stream`
+        SPEAD stream for incoming data
+    _run_future : :class:`trollius.Task`
+        Task for the coroutine that does the work
+    _timestep : int
+        Time interval (in ADC clocks) between spectra
+    """
     def __init__(self, args, loop):
         self._loop = loop
         self._args = args
@@ -39,12 +72,14 @@ class _CaptureSession(object):
         self._run_future = trollius.async(self._run(), loop=self._loop)
 
     def _create_file(self):
+        """Create the HDF5 file and dataset. This is called once the data shape
+        is known.
+        """
         filename = os.path.join(self._args.file_base, '{}.h5'.format(int(time.time())))
         # Allocate enough cache space for 3 chunks - should be enough for one active, one
         # being written back, and a bit extra for timestamps.
         n_chans, n_time = self._ig['bf_raw'].shape[0:2]
         dtype = self._ig['bf_raw'].dtype
-        cache_size = 4 * n_time * n_chans * 2 * dtype.itemsize
         self._file = h5py.File(filename, mode='w')
         self._file.attrs['version'] = 1
         data_group = self._file.create_group('Data')
@@ -58,15 +93,20 @@ class _CaptureSession(object):
 
     @trollius.coroutine
     def _run(self):
+        """Does the work of capturing a stream. This is a coroutine."""
         try:
             data_heaps = 0
             while True:
                 heap = yield From(self._stream.get())
                 updated = self._ig.update(heap)
                 is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
-                if (not self._file
-                    and (heap.is_start_of_stream() or is_data_heap)
-                    and 'bf_raw' in self._ig):
+                # Check whether we need to, and can, create the file. We need
+                # the descriptor for bf_raw, but CBF is also known to send
+                # multiple versions of some metadata, so we wait for an
+                # indication that the metadata is complete.
+                if (not self._file and
+                        (heap.is_start_of_stream() or is_data_heap) and
+                        'bf_raw' in self._ig):
                     self._create_file()
                 if not is_data_heap:
                     _logger.info('Received non-data heap %d', heap.cnt)
@@ -79,7 +119,7 @@ class _CaptureSession(object):
                 if n_chans != self._bf_raw_dataset.shape[0]:
                     _logger.warning('Dropping heap because number of channels does not match')
                     continue
-                idx = self._bf_raw_dataset.shape[1]
+                idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
                 self._bf_raw_dataset.resize(idx + n_time, axis=1)
                 self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
                 self._timestamps.append(timestamp)
@@ -89,6 +129,9 @@ class _CaptureSession(object):
                     _logger.info('Received %d data heaps', data_heaps)
                     stat = os.statvfs(self._file.filename)
                     free_bytes = stat.f_frsize * stat.f_bavail
+                    # We check only every 100 dumps, so this actually only
+                    # guarantees 200 dumps free. That's a reasonable gap to
+                    # allow for buffering, HDF5 overheads etc.
                     if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * data_heaps:
                         _logger.warn('Capture stopped due to lack of disk space')
                         break
@@ -102,6 +145,7 @@ class _CaptureSession(object):
         finally:
             self._stream.stop()
             if self._file:
+                # Write the timestamps to file
                 n_time = self._ig['bf_raw'].shape[1]
                 ds = self._file['Data'].create_dataset(
                     'timestamp',
@@ -118,13 +162,44 @@ class _CaptureSession(object):
 
     @trollius.coroutine
     def stop(self):
+        """Shut down the stream and wait for the coroutine to complete. This
+        is a coroutine.
+        """
         self._manual_stop = True
         self._stream.stop()
         yield From(self._run_future)
 
 
 class CaptureServer(katcp.DeviceServer):
-    """katcp device server for beamformer simulation"""
+    """katcp device server for beamformer capture.
+
+    Parameters
+    ----------
+    args : :class:`argparse.Namespace`
+        Command-line arguments. The following arguments are required:
+
+        host
+          Hostname to bind to ('' for none)
+        port
+          Port number to bind to
+        cbf_channels
+          Total number of PFB channels, or ``None`` for unknown
+        cbf_spead
+          List of :class:`katsdptelstate.endpoint.Endpoint` for receiving SPEAD data
+        file_base
+          Directory in which to write files
+    loop : :class:`trollius.BaseEventLoop`
+        IO Loop for running coroutines
+
+    Attributes
+    ----------
+    _args : :class:`argparse.Namespace`
+        Command-line arguments passed to constructor
+    _loop : :class:`trollius.BaseEventLoop`
+        IO Loop passed to constructor
+    _capture : :class:`_CaptureSession`
+        Current capture session, or ``None`` if not capturing
+    """
     VERSION_INFO = ('bf-ingest', 1, 0)
     BUILD_INFO = ('katsdpingest',) + tuple(katsdpingest.__version__.split('.', 1)) + ('',)
 
@@ -140,7 +215,7 @@ class CaptureServer(katcp.DeviceServer):
     @request()
     @return_reply()
     def request_capture_init(self, sock):
-        """Start capture to file"""
+        """Start capture to file."""
         if self._capture is not None:
             return ('fail', 'already capturing')
         self._capture = _CaptureSession(self._args, self._loop)
@@ -157,7 +232,7 @@ class CaptureServer(katcp.DeviceServer):
     @return_reply()
     @tornado.gen.coroutine
     def request_capture_done(self, sock):
-        """Stop a capture that is in progress"""
+        """Stop a capture that is in progress."""
         if self._capture is None:
             raise tornado.gen.Return(('fail', 'not capturing'))
         yield self._stop_capture()
@@ -167,5 +242,8 @@ class CaptureServer(katcp.DeviceServer):
     def stop(self):
         yield self._stop_capture()
         yield super(CaptureServer, self).stop()
+
+    stop.__doc__ = katcp.DeviceServer.stop.__doc__
+
 
 __all__ = ['CaptureServer']
