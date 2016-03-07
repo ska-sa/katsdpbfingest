@@ -94,9 +94,9 @@ class _CaptureSession(object):
     @trollius.coroutine
     def _run(self):
         """Does the work of capturing a stream. This is a coroutine."""
+        data_heaps = 0
         try:
             try:
-                data_heaps = 0
                 while True:
                     heap = yield From(self._stream.get())
                     updated = self._ig.update(heap)
@@ -161,6 +161,19 @@ class _CaptureSession(object):
                     idx += n_time
                 self._file.close()
                 self._file = None
+
+            if self._timestamps:
+                elapsed = max(self._timestamps) - min(self._timestamps)
+                expected_heaps = elapsed // (n_time * self._timestep) + 1
+            else:
+                expected_heaps = 0
+            _logger.info('Received %d heaps, expected %d based on min/max timestamps',
+                         data_heaps, expected_heaps)
+            if data_heaps < expected_heaps:
+                _logger.warn('%d heaps missing', expected_heaps - data_heaps)
+            elif data_heaps > expected_heaps:
+                _logger.warn('%d more heaps than expected (timestamp errors?)',
+                             data_heaps - expected_heaps)
 
     @trollius.coroutine
     def stop(self):
