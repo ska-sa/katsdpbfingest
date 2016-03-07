@@ -170,18 +170,16 @@ class _CaptureSession(object):
         yield From(self._run_future)
 
 
-class CaptureServer(katcp.DeviceServer):
-    """katcp device server for beamformer capture.
+class CaptureServer(object):
+    """Beamformer capture. This contains all the core functionality of the
+    katcp device server, without depending on katcp. It is split like this
+    to facilitate unit testing.
 
     Parameters
     ----------
     args : :class:`argparse.Namespace`
         Command-line arguments. The following arguments are required:
 
-        host
-          Hostname to bind to ('' for none)
-        port
-          Port number to bind to
         cbf_channels
           Total number of PFB channels, or ``None`` for unknown
         cbf_spead
@@ -193,6 +191,10 @@ class CaptureServer(katcp.DeviceServer):
 
     Attributes
     ----------
+    capturing : :class:`bool`
+        Whether a capture session is in progress. Note that a session is
+        considered to be in progress until explicitly stopped with
+        :class:`stop_capture`, even if the stream has terminated.
     _args : :class:`argparse.Namespace`
         Command-line arguments passed to constructor
     _loop : :class:`trollius.BaseEventLoop`
@@ -200,14 +202,51 @@ class CaptureServer(katcp.DeviceServer):
     _capture : :class:`_CaptureSession`
         Current capture session, or ``None`` if not capturing
     """
+    def __init__(self, args, loop):
+        self._args = args
+        self._loop = loop
+        self._capture = None
+
+    @property
+    def capturing(self):
+        return self._capture is not None
+
+    def start_capture(self):
+        """Start capture to file, if not already in progress."""
+        if self._capture is None:
+            self._capture = _CaptureSession(self._args, self._loop)
+
+    @trollius.coroutine
+    def stop_capture(self):
+        """Stop capture to file, if currently running. This is a co-routine."""
+        if self._capture is not None:
+            yield From(self._capture.stop())
+            self._capture = None
+
+
+class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
+    """katcp device server for beamformer capture.
+
+    Parameters
+    ----------
+    args : :class:`argparse.Namespace`
+        Command-line arguments (see :class:`CaptureServer`).
+        The following additional arguments are required:
+
+        host
+          Hostname to bind to ('' for none)
+        port
+          Port number to bind to
+    loop : :class:`trollius.BaseEventLoop`
+        IO Loop for running coroutines
+    """
+
     VERSION_INFO = ('bf-ingest', 1, 0)
     BUILD_INFO = ('katsdpingest',) + tuple(katsdpingest.__version__.split('.', 1)) + ('',)
 
     def __init__(self, args, loop):
-        super(CaptureServer, self).__init__(args.host, args.port)
-        self._args = args
-        self._loop = loop
-        self._capture = None
+        CaptureServer.__init__(self, args, loop)
+        katcp.DeviceServer.__init__(self, args.host, args.port)
 
     def setup_sensors(self):
         pass
@@ -216,24 +255,23 @@ class CaptureServer(katcp.DeviceServer):
     @return_reply()
     def request_capture_init(self, sock):
         """Start capture to file."""
-        if self._capture is not None:
+        if self.capturing:
             return ('fail', 'already capturing')
-        self._capture = _CaptureSession(self._args, self._loop)
+        self.start_capture()
         return ('ok',)
 
     @tornado.gen.coroutine
     def _stop_capture(self):
-        if self._capture is not None:
-            stop_future = trollius.async(self._capture.stop(), loop=self._loop)
-            yield tornado.platform.asyncio.to_tornado_future(stop_future)
-            self._capture = None
+        """Tornado variant of :meth:`stop_capture`"""
+        stop_future = trollius.async(self.stop_capture(), loop=self._loop)
+        yield tornado.platform.asyncio.to_tornado_future(stop_future)
 
     @request()
     @return_reply()
     @tornado.gen.coroutine
     def request_capture_done(self, sock):
         """Stop a capture that is in progress."""
-        if self._capture is None:
+        if not self.capturing:
             raise tornado.gen.Return(('fail', 'not capturing'))
         yield self._stop_capture()
         raise tornado.gen.Return(('ok',))
@@ -241,9 +279,9 @@ class CaptureServer(katcp.DeviceServer):
     @tornado.gen.coroutine
     def stop(self):
         yield self._stop_capture()
-        yield super(CaptureServer, self).stop()
+        yield katcp.DeviceServer.stop(self)
 
     stop.__doc__ = katcp.DeviceServer.stop.__doc__
 
 
-__all__ = ['CaptureServer']
+__all__ = ['CaptureServer', 'KatcpCaptureServer']

@@ -8,7 +8,7 @@ import logging
 from trollius import From
 import argparse
 import katsdptelstate.endpoint
-from katsdpingest.bf_ingest_server import CaptureServer
+from katsdpingest.bf_ingest_server import KatcpCaptureServer
 
 
 @trollius.coroutine
@@ -31,7 +31,7 @@ def main():
 
     ioloop = AsyncIOMainLoop()
     ioloop.install()
-    server = CaptureServer(args, trollius.get_event_loop())
+    server = KatcpCaptureServer(args, trollius.get_event_loop())
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)
     trollius.get_event_loop().add_signal_handler(
