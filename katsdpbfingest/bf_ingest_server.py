@@ -95,53 +95,55 @@ class _CaptureSession(object):
     def _run(self):
         """Does the work of capturing a stream. This is a coroutine."""
         try:
-            data_heaps = 0
-            while True:
-                heap = yield From(self._stream.get())
-                updated = self._ig.update(heap)
-                is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
-                # Check whether we need to, and can, create the file. We need
-                # the descriptor for bf_raw, but CBF is also known to send
-                # multiple versions of some metadata, so we wait for an
-                # indication that the metadata is complete.
-                if (not self._file and
-                        (heap.is_start_of_stream() or is_data_heap) and
-                        'bf_raw' in self._ig):
-                    self._create_file()
-                if not is_data_heap:
-                    _logger.info('Received non-data heap %d', heap.cnt)
-                    continue
-                timestamp = self._ig['timestamp'].value
-                bf_raw = self._ig['bf_raw'].value
-                _logger.debug('Received heap with timestamp %d', timestamp)
+            try:
+                data_heaps = 0
+                while True:
+                    heap = yield From(self._stream.get())
+                    updated = self._ig.update(heap)
+                    is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
+                    # Check whether we need to, and can, create the file. We need
+                    # the descriptor for bf_raw, but CBF is also known to send
+                    # multiple versions of some metadata, so we wait for an
+                    # indication that the metadata is complete.
+                    if (not self._file and
+                            (heap.is_start_of_stream() or is_data_heap) and
+                            'bf_raw' in self._ig):
+                        self._create_file()
+                    if not is_data_heap:
+                        _logger.info('Received non-data heap %d', heap.cnt)
+                        continue
+                    timestamp = self._ig['timestamp'].value
+                    bf_raw = self._ig['bf_raw'].value
+                    _logger.debug('Received heap with timestamp %d', timestamp)
 
-                n_chans, n_time = bf_raw.shape[0:2]
-                if n_chans != self._bf_raw_dataset.shape[0]:
-                    _logger.warning('Dropping heap because number of channels does not match')
-                    continue
-                idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
-                self._bf_raw_dataset.resize(idx + n_time, axis=1)
-                self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
-                self._timestamps.append(timestamp)
-                data_heaps += 1
-                # Check free space periodically, but every heap is excessive
-                if data_heaps % 100 == 0:
-                    _logger.info('Received %d data heaps', data_heaps)
-                    stat = os.statvfs(self._file.filename)
-                    free_bytes = stat.f_frsize * stat.f_bavail
-                    # We check only every 100 dumps, so this actually only
-                    # guarantees 200 dumps free. That's a reasonable gap to
-                    # allow for buffering, HDF5 overheads etc.
-                    if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * data_heaps:
-                        _logger.warn('Capture stopped due to lack of disk space')
-                        break
-        except spead2.Stopped:
-            if self._manual_stop:
-                _logger.info('Capture terminated by request')
-            else:
-                _logger.info('Capture terminated by stop heap')
-        except Exception:
-            _logger.error('Capture coroutine threw uncaught exception', exc_info=True)
+                    n_chans, n_time = bf_raw.shape[0:2]
+                    if n_chans != self._bf_raw_dataset.shape[0]:
+                        _logger.warning('Dropping heap because number of channels does not match')
+                        continue
+                    idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
+                    self._bf_raw_dataset.resize(idx + n_time, axis=1)
+                    self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
+                    self._timestamps.append(timestamp)
+                    data_heaps += 1
+                    # Check free space periodically, but every heap is excessive
+                    if data_heaps % 100 == 0:
+                        _logger.info('Received %d data heaps', data_heaps)
+                        stat = os.statvfs(self._file.filename)
+                        free_bytes = stat.f_frsize * stat.f_bavail
+                        # We check only every 100 dumps, so this actually only
+                        # guarantees 200 dumps free. That's a reasonable gap to
+                        # allow for buffering, HDF5 overheads etc.
+                        if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * data_heaps:
+                            _logger.warn('Capture stopped due to lack of disk space')
+                            break
+            except spead2.Stopped:
+                if self._manual_stop:
+                    _logger.info('Capture terminated by request')
+                else:
+                    _logger.info('Capture terminated by stop heap')
+            except Exception:
+                _logger.error('Capture coroutine threw uncaught exception', exc_info=True)
+                raise
         finally:
             self._stream.stop()
             if self._file:
