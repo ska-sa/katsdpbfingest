@@ -71,7 +71,7 @@ class _CaptureSession(object):
             self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host)
         self._run_future = trollius.async(self._run(), loop=self._loop)
 
-    def _create_file(self):
+    def _create_file_and_memory_pool(self):
         """Create the HDF5 file and dataset. This is called once the data shape
         is known.
         """
@@ -90,6 +90,9 @@ class _CaptureSession(object):
         if self._timestep is None:
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
+        chunk_size = n_time * n_chans * 2 * dtype.itemsize
+        memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 16, 16)
+        self._stream.set_memory_pool(memory_pool)
 
     @trollius.coroutine
     def _run(self):
@@ -108,7 +111,7 @@ class _CaptureSession(object):
                     if (not self._file and
                             (heap.is_start_of_stream() or is_data_heap) and
                             'bf_raw' in self._ig):
-                        self._create_file()
+                        self._create_file_and_memory_pool()
                     if not is_data_heap:
                         _logger.info('Received non-data heap %d', heap.cnt)
                         continue
