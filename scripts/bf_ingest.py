@@ -7,6 +7,8 @@ from tornado.platform.asyncio import AsyncIOMainLoop, to_asyncio_future
 import logging
 from trollius import From
 import argparse
+import os
+import sys
 import katsdptelstate.endpoint
 from katsdpingest.bf_ingest_server import KatcpCaptureServer
 
@@ -28,6 +30,9 @@ def main():
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
     args = parser.parse_args()
     logging.basicConfig(level=args.logging, format='%(asctime)s %(levelname)s:%(name)s: %(message)s')
+    if not os.access(args.file_base, os.W_OK):
+        logging.error('Target directory (%s) is not writable', args.file_base)
+        sys.exit(1)
 
     ioloop = AsyncIOMainLoop()
     ioloop.install()
