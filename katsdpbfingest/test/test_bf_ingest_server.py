@@ -53,7 +53,7 @@ class TestCaptureSession(object):
         self._h5py_patcher.stop()
         self._spead_patcher.stop()
         if MockFile.instance:
-            Mockfile.instance.really_close()
+            MockFile.instance.really_close()
 
     @trollius.coroutine
     def _test_manual_stop_no_data(self):
@@ -82,7 +82,7 @@ class TestCaptureSession(object):
         ig.add_item(name='timestamp', id=0x1600,
                     description='Timestamp', shape=(), format=[('u', 48)])
         ig.add_item(name='bf_raw',  id=0x5000,
-                    description='Beamformer data', shape=(n_channels, n_time, 2), format=[('i', 8)])
+                    description='Beamformer data', shape=(n_channels, n_time, 2), dtype=np.int8)
         stream.send_heap(ig.get_heap())
         stream.send_heap(ig.get_start())
         ts = 1234567890
