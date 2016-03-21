@@ -91,7 +91,7 @@ class _CaptureSession(object):
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
         chunk_size = n_time * n_chans * 2 * dtype.itemsize
-        memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 16, 16)
+        memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 8, 2)
         self._stream.set_memory_pool(memory_pool)
 
     @trollius.coroutine
