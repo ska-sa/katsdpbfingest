@@ -32,7 +32,7 @@ class MockFile(h5py.File):
         MockFile.instance = None
 
 
-class TestCaptureSession(object):
+class BaseTestCaptureSession(object):
     def setup(self):
         def add_buffer_reader(stream, *args, **kwargs):
             stream.add_buffer_reader(self.spead_data)
@@ -41,7 +41,8 @@ class TestCaptureSession(object):
         self.args = argparse.Namespace(
             cbf_channels=4096,
             cbf_spead=[endpoint.Endpoint('239.1.2.3', 7148)],
-            file_base='/not_a_directory')
+            file_base='/not_a_directory',
+            buffer=self.buffer)
         self.loop = trollius.get_event_loop()
         self._spead_patcher = mock.patch.object(
             spead2.recv.trollius.Stream, 'add_udp_reader', add_buffer_reader)
@@ -133,3 +134,11 @@ class TestCaptureSession(object):
     def test_stream_no_end(self):
         """Stream ends with a stop request"""
         trollius.get_event_loop().run_until_complete(self._test_stream(False))
+
+
+class TestCaptureSessionNoBuffer(BaseTestCaptureSession):
+    buffer = False
+
+
+class TestCaptureSessionBuffer(BaseTestCaptureSession):
+    buffer = True
