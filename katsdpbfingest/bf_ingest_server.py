@@ -41,6 +41,8 @@ class _CaptureSession(object):
         Handle to HDF5 file
     _bf_raw_dataset : :class:`h5py.Dataset`
         Handle to the ``bf_raw`` dataset
+    _bf_raw : :class:`list`
+        `bf_raw` numpy arrays received when in buffering mode
     _timestamps : :class:`list`
         Timestamp for the start of each heap
     _manual_stop : :class:`bool`
@@ -53,18 +55,13 @@ class _CaptureSession(object):
         Task for the coroutine that does the work
     _timestep : int
         Time interval (in ADC clocks) between spectra
-    _n_heaps : int
-        Number of heaps processed (not received) so far
-    _heaps : list
-        Heaps received when in buffering mode
     """
     def __init__(self, args, loop):
         self._loop = loop
         self._args = args
-        self._n_heaps = 0
-        self._heaps = []
         self._file = None
         self._bf_raw_dataset = None
+        self._bf_raw = []
         self._timestamps = []
         self._manual_stop = False
         if args.cbf_channels:
@@ -98,11 +95,28 @@ class _CaptureSession(object):
         if self._timestep is None:
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
-        # Memory pool only makes sense when not in buffering mode
-        if not self._args.buffer:
-            chunk_size = n_time * n_chans * 2 * dtype.itemsize
-            memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 8, 2)
-            self._stream.set_memory_pool(memory_pool)
+        chunk_size = n_time * n_chans * 2 * dtype.itemsize
+        memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 8, 2)
+        self._stream.set_memory_pool(memory_pool)
+
+    def _write_heap(self, bf_raw):
+        n_time = bf_raw.shape[1]
+        idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
+        self._bf_raw_dataset.resize(idx + n_time, axis=1)
+        self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
+        # Check free space periodically, but every heap is excessive
+        n_heaps = idx // n_time + 1
+        if n_heaps % 100 == 0:
+            _logger.info('Processed %d data heaps', n_heaps)
+            stat = os.statvfs(self._file.filename)
+            free_bytes = stat.f_frsize * stat.f_bavail
+            # We check only every 100 dumps, so this actually only
+            # guarantees 200 dumps free. That's a reasonable gap to
+            # allow for buffering, HDF5 overheads etc.
+            if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * n_heaps:
+                _logger.warn('Processing stopped due to lack of disk space')
+                return False
+        return True
 
     def _process_heap(self, heap):
         """
@@ -127,38 +141,37 @@ class _CaptureSession(object):
             _logger.info('Received non-data heap %d', heap.cnt)
             return True
         timestamp = self._ig['timestamp'].value
+        self._timestamps.append(timestamp)
         bf_raw = self._ig['bf_raw'].value
         _logger.debug('Received heap with timestamp %d', timestamp)
 
-        n_chans, n_time = bf_raw.shape[0:2]
+        n_chans = bf_raw.shape[0]
         if n_chans != self._bf_raw_dataset.shape[0]:
             _logger.warning('Dropping heap because number of channels does not match')
             return True
-        idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
-        self._bf_raw_dataset.resize(idx + n_time, axis=1)
-        self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
-        self._timestamps.append(timestamp)
-        self._n_heaps += 1
-        # Check free space periodically, but every heap is excessive
-        if self._n_heaps % 100 == 0:
-            _logger.info('Processed %d data heaps', self._n_heaps)
-            stat = os.statvfs(self._file.filename)
-            free_bytes = stat.f_frsize * stat.f_bavail
-            # We check only every 100 dumps, so this actually only
-            # guarantees 200 dumps free. That's a reasonable gap to
-            # allow for buffering, HDF5 overheads etc.
-            if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * self._n_heaps:
-                _logger.warn('Processing stopped due to lack of disk space')
-                return False
-        return True
+        if self._args.buffer:
+            # bf_raw is copied so that the memory underlying the heap can be
+            # returned to the memory pool. This moves the cost of new memory
+            # allocations (with associated page faults and clearing of memory)
+            # into this thread and out of the spead2 thread.
+            self._bf_raw.append(bf_raw.copy())
+            n_heaps = len(self._bf_raw)
+            if n_heaps % 100 == 0:
+                _logger.info('Received %d heaps', n_heaps)
+                if psutil.virtual_memory().available < 4 * 1024**3:
+                    _logger.warn('Capture terminated due to lack of memory')
+                    return False
+            return True
+        else:
+            return self._write_heap(bf_raw)
 
     def _finalise(self):
         self._stream.stop()
-        if self._args.buffer:
-            for heap in self._heaps:
-                if not self._process_heap(heap):
-                    break
         if self._file:
+            # In buffering mode, write the data to file
+            for bf_raw in self._bf_raw:
+                if not self._write_heap(bf_raw):
+                    break
             # Write the timestamps to file
             n_time = self._ig['bf_raw'].shape[1]
             ds = self._file['Data'].create_dataset(
@@ -179,13 +192,14 @@ class _CaptureSession(object):
             expected_heaps = elapsed // (n_time * self._timestep) + 1
         else:
             expected_heaps = 0
+        n_heaps = len(self._timestamps)
         _logger.info('Received %d heaps, expected %d based on min/max timestamps',
-                     self._n_heaps, expected_heaps)
-        if self._n_heaps < expected_heaps:
-            _logger.warn('%d heaps missing', expected_heaps - self._n_heaps)
-        elif self._n_heaps > expected_heaps:
+                     n_heaps, expected_heaps)
+        if n_heaps < expected_heaps:
+            _logger.warn('%d heaps missing', expected_heaps - n_heaps)
+        elif n_heaps > expected_heaps:
             _logger.warn('%d more heaps than expected (timestamp errors?)',
-                         self._n_heaps - expected_heaps)
+                         n_heaps - expected_heaps)
         _logger.info('Capture complete')
 
     @trollius.coroutine
@@ -195,17 +209,8 @@ class _CaptureSession(object):
             try:
                 while True:
                     heap = yield From(self._stream.get())
-                    if self._args.buffer:
-                        self._heaps.append(heap)
-                        n_heaps = len(self._heaps)
-                        if n_heaps % 100 == 0:
-                            _logger.info('Received %d heaps', n_heaps)
-                            if psutil.virtual_memory().available < 4 * 1024**3:
-                                _logger.warn('Capture terminated due to lack of memory')
-                                break
-                    else:
-                        if not self._process_heap(heap):
-                            break
+                    if not self._process_heap(heap):
+                        break
             except spead2.Stopped:
                 if self._manual_stop:
                     _logger.info('Capture terminated by request')
