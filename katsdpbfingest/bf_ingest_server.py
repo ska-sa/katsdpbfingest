@@ -14,6 +14,7 @@ from trollius import From
 import tornado
 import logging
 import katsdpingest
+import psutil
 
 
 _logger = logging.getLogger(__name__)
@@ -52,10 +53,16 @@ class _CaptureSession(object):
         Task for the coroutine that does the work
     _timestep : int
         Time interval (in ADC clocks) between spectra
+    _n_heaps : int
+        Number of heaps processed (not received) so far
+    _heaps : list
+        Heaps received when in buffering mode
     """
     def __init__(self, args, loop):
         self._loop = loop
         self._args = args
+        self._n_heaps = 0
+        self._heaps = []
         self._file = None
         self._bf_raw_dataset = None
         self._timestamps = []
@@ -76,6 +83,7 @@ class _CaptureSession(object):
         is known.
         """
         filename = os.path.join(self._args.file_base, '{}.h5'.format(int(time.time())))
+        _logger.info('Creating file %s', filename)
         # Allocate enough cache space for 3 chunks - should be enough for one active, one
         # being written back, and a bit extra for timestamps.
         n_chans, n_time = self._ig['bf_raw'].shape[0:2]
@@ -90,54 +98,113 @@ class _CaptureSession(object):
         if self._timestep is None:
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
-        chunk_size = n_time * n_chans * 2 * dtype.itemsize
-        memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 8, 2)
-        self._stream.set_memory_pool(memory_pool)
+        # Memory pool only makes sense when not in buffering mode
+        if not self._args.buffer:
+            chunk_size = n_time * n_chans * 2 * dtype.itemsize
+            memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 8, 2)
+            self._stream.set_memory_pool(memory_pool)
+
+    def _process_heap(self, heap):
+        """
+        Apply processing for a single heap.
+
+        Returns
+        -------
+        bool
+            True to continue, False if processing should stop due to lack of space
+        """
+        updated = self._ig.update(heap)
+        is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
+        # Check whether we need to, and can, create the file. We need
+        # the descriptor for bf_raw, but CBF is also known to send
+        # multiple versions of some metadata, so we wait for an
+        # indication that the metadata is complete.
+        if (not self._file and
+                (heap.is_start_of_stream() or is_data_heap) and
+                'bf_raw' in self._ig):
+            self._create_file_and_memory_pool()
+        if not is_data_heap:
+            _logger.info('Received non-data heap %d', heap.cnt)
+            return True
+        timestamp = self._ig['timestamp'].value
+        bf_raw = self._ig['bf_raw'].value
+        _logger.debug('Received heap with timestamp %d', timestamp)
+
+        n_chans, n_time = bf_raw.shape[0:2]
+        if n_chans != self._bf_raw_dataset.shape[0]:
+            _logger.warning('Dropping heap because number of channels does not match')
+            return True
+        idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
+        self._bf_raw_dataset.resize(idx + n_time, axis=1)
+        self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
+        self._timestamps.append(timestamp)
+        self._n_heaps += 1
+        # Check free space periodically, but every heap is excessive
+        if self._n_heaps % 100 == 0:
+            _logger.info('Processed %d data heaps', self._n_heaps)
+            stat = os.statvfs(self._file.filename)
+            free_bytes = stat.f_frsize * stat.f_bavail
+            # We check only every 100 dumps, so this actually only
+            # guarantees 200 dumps free. That's a reasonable gap to
+            # allow for buffering, HDF5 overheads etc.
+            if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * self._n_heaps:
+                _logger.warn('Processing stopped due to lack of disk space')
+                return False
+        return True
+
+    def _finalise(self):
+        self._stream.stop()
+        if self._args.buffer:
+            for heap in self._heaps:
+                if not self._process_heap(heap):
+                    break
+        if self._file:
+            # Write the timestamps to file
+            n_time = self._ig['bf_raw'].shape[1]
+            ds = self._file['Data'].create_dataset(
+                'timestamp',
+                shape=(n_time * len(self._timestamps),),
+                dtype=np.uint64)
+            idx = 0
+            for timestamp in self._timestamps:
+                ds[idx : idx + n_time] = np.arange(
+                    timestamp, timestamp + n_time * self._timestep, self._timestep,
+                    dtype=np.uint64)
+                idx += n_time
+            self._file.close()
+            self._file = None
+
+        if self._timestamps:
+            elapsed = max(self._timestamps) - min(self._timestamps)
+            expected_heaps = elapsed // (n_time * self._timestep) + 1
+        else:
+            expected_heaps = 0
+        _logger.info('Received %d heaps, expected %d based on min/max timestamps',
+                     self._n_heaps, expected_heaps)
+        if self._n_heaps < expected_heaps:
+            _logger.warn('%d heaps missing', expected_heaps - self._n_heaps)
+        elif self._n_heaps > expected_heaps:
+            _logger.warn('%d more heaps than expected (timestamp errors?)',
+                         self._n_heaps - expected_heaps)
+        _logger.info('Capture complete')
 
     @trollius.coroutine
     def _run(self):
         """Does the work of capturing a stream. This is a coroutine."""
-        data_heaps = 0
         try:
             try:
                 while True:
                     heap = yield From(self._stream.get())
-                    updated = self._ig.update(heap)
-                    is_data_heap = 'timestamp' in updated and 'bf_raw' in updated
-                    # Check whether we need to, and can, create the file. We need
-                    # the descriptor for bf_raw, but CBF is also known to send
-                    # multiple versions of some metadata, so we wait for an
-                    # indication that the metadata is complete.
-                    if (not self._file and
-                            (heap.is_start_of_stream() or is_data_heap) and
-                            'bf_raw' in self._ig):
-                        self._create_file_and_memory_pool()
-                    if not is_data_heap:
-                        _logger.info('Received non-data heap %d', heap.cnt)
-                        continue
-                    timestamp = self._ig['timestamp'].value
-                    bf_raw = self._ig['bf_raw'].value
-                    _logger.debug('Received heap with timestamp %d', timestamp)
-
-                    n_chans, n_time = bf_raw.shape[0:2]
-                    if n_chans != self._bf_raw_dataset.shape[0]:
-                        _logger.warning('Dropping heap because number of channels does not match')
-                        continue
-                    idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
-                    self._bf_raw_dataset.resize(idx + n_time, axis=1)
-                    self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
-                    self._timestamps.append(timestamp)
-                    data_heaps += 1
-                    # Check free space periodically, but every heap is excessive
-                    if data_heaps % 100 == 0:
-                        _logger.info('Received %d data heaps', data_heaps)
-                        stat = os.statvfs(self._file.filename)
-                        free_bytes = stat.f_frsize * stat.f_bavail
-                        # We check only every 100 dumps, so this actually only
-                        # guarantees 200 dumps free. That's a reasonable gap to
-                        # allow for buffering, HDF5 overheads etc.
-                        if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * data_heaps:
-                            _logger.warn('Capture stopped due to lack of disk space')
+                    if self._args.buffer:
+                        self._heaps.append(heap)
+                        n_heaps = len(self._heaps)
+                        if n_heaps % 100 == 0:
+                            _logger.info('Received %d heaps', n_heaps)
+                            if psutil.virtual_memory().available < 4 * 1024**3:
+                                _logger.warn('Capture terminated due to lack of memory')
+                                break
+                    else:
+                        if not self._process_heap(heap):
                             break
             except spead2.Stopped:
                 if self._manual_stop:
@@ -148,35 +215,11 @@ class _CaptureSession(object):
                 _logger.error('Capture coroutine threw uncaught exception', exc_info=True)
                 raise
         finally:
-            self._stream.stop()
-            if self._file:
-                # Write the timestamps to file
-                n_time = self._ig['bf_raw'].shape[1]
-                ds = self._file['Data'].create_dataset(
-                    'timestamp',
-                    shape=(n_time * len(self._timestamps),),
-                    dtype=np.uint64)
-                idx = 0
-                for timestamp in self._timestamps:
-                    ds[idx : idx + n_time] = np.arange(
-                        timestamp, timestamp + n_time * self._timestep, self._timestep,
-                        dtype=np.uint64)
-                    idx += n_time
-                self._file.close()
-                self._file = None
-
-            if self._timestamps:
-                elapsed = max(self._timestamps) - min(self._timestamps)
-                expected_heaps = elapsed // (n_time * self._timestep) + 1
-            else:
-                expected_heaps = 0
-            _logger.info('Received %d heaps, expected %d based on min/max timestamps',
-                         data_heaps, expected_heaps)
-            if data_heaps < expected_heaps:
-                _logger.warn('%d heaps missing', expected_heaps - data_heaps)
-            elif data_heaps > expected_heaps:
-                _logger.warn('%d more heaps than expected (timestamp errors?)',
-                             data_heaps - expected_heaps)
+            try:
+                self._finalise()
+            except Exception:
+                _logger.error('Capture coroutine threw uncaught exception while finalising', exc_info=True)
+                raise
 
     @trollius.coroutine
     def stop(self):
