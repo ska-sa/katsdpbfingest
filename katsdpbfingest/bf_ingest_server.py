@@ -110,10 +110,10 @@ class _CaptureSession(object):
             _logger.info('Processed %d data heaps', n_heaps)
             stat = os.statvfs(self._file.filename)
             free_bytes = stat.f_frsize * stat.f_bavail
-            # We check only every 100 dumps, so this actually only
-            # guarantees 200 dumps free. That's a reasonable gap to
-            # allow for buffering, HDF5 overheads etc.
-            if free_bytes < 300 * bf_raw.nbytes + 8 * n_time * n_heaps:
+            # We check only every 100 dumps, so we need enough space for
+            # the remaining dumps, plus all the timestamps. We also leave
+            # a fixed amount free to ensure that there is room for overheads.
+            if free_bytes < 1024**3 + 100 * bf_raw.nbytes + 8 * n_time * n_heaps:
                 _logger.warn('Processing stopped due to lack of disk space')
                 return False
         return True
@@ -158,7 +158,10 @@ class _CaptureSession(object):
             n_heaps = len(self._bf_raw)
             if n_heaps % 100 == 0:
                 _logger.info('Received %d heaps', n_heaps)
-                if psutil.virtual_memory().available < 4 * 1024**3:
+                # Since we only check every 100 dumps, we need to have enough
+                # memory for another 100 dumps, plus we leave a decent amount
+                # free so that the system doesn't start paging too much out.
+                if psutil.virtual_memory().available < 2 * 1024**3 + 100 * bf_raw.nbytes:
                     _logger.warn('Capture terminated due to lack of memory')
                     return False
             return True
