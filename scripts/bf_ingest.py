@@ -10,6 +10,7 @@ import argparse
 import os
 import sys
 import katsdptelstate.endpoint
+import spead2
 from katsdpingest.bf_ingest_server import KatcpCaptureServer
 
 
@@ -27,6 +28,7 @@ def main():
     parser.add_argument('--logging', '-l', type=str, metavar='LEVEL', default='INFO', help='log level')
     parser.add_argument('--file-base', default='.', type=str, help='base directory into which to write HDF5 files', metavar='DIR')
     parser.add_argument('--buffer', action='store_true', help='Buffer all data in memory during capture')
+    parser.add_argument('--affinity', type=spead2.parse_range_list, help='List of CPUs to which to bind threads')
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
     args = parser.parse_args()

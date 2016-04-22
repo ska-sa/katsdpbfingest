@@ -69,10 +69,17 @@ class _CaptureSession(object):
         else:
             self._timestep = None
         self._ig = spead2.ItemGroup()
-        self._stream = spead2.recv.trollius.Stream(spead2.ThreadPool(), 0, loop=self._loop)
+        if args.affinity:
+            spead2.ThreadPool.setaffinity(args.affinity[0])
+            thread_pool = spead2.ThreadPool(1, [args.affinity[1 % len(args.affinity)]])
+        else:
+            thread_pool = spead2.ThreadPool()
+        self._stream = spead2.recv.trollius.Stream(thread_pool, 0, ring_heaps=16, loop=self._loop)
         for endpoint in args.cbf_spead:
             _logger.info('Listening on endpoint {}'.format(endpoint))
-            self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host)
+            # Buffer size is increased from the default, because doing so seems to prevent some
+            # occasional dropped heaps
+            self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host, buffer_size=16*1024*1024)
         self._run_future = trollius.async(self._run(), loop=self._loop)
 
     def _create_file_and_memory_pool(self):
@@ -96,7 +103,14 @@ class _CaptureSession(object):
             _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', n_chans)
             self._timestep = 2 * n_chans
         chunk_size = n_time * n_chans * 2 * dtype.itemsize
-        memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 8, 2)
+        if self._args.buffer:
+            if self._args.affinity:
+                thread_pool = spead2.ThreadPool(1, [self._args.affinity[2 % len(self._args.affinity)]])
+            else:
+                thread_pool = spead2.ThreadPool()
+            memory_pool = spead2.MemoryPool(thread_pool, chunk_size, chunk_size + 4096, 16, 8, 7)
+        else:
+            memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 24, 16)
         self._stream.set_memory_pool(memory_pool)
 
     def _write_heap(self, bf_raw):
@@ -150,11 +164,7 @@ class _CaptureSession(object):
             _logger.warning('Dropping heap because number of channels does not match')
             return True
         if self._args.buffer:
-            # bf_raw is copied so that the memory underlying the heap can be
-            # returned to the memory pool. This moves the cost of new memory
-            # allocations (with associated page faults and clearing of memory)
-            # into this thread and out of the spead2 thread.
-            self._bf_raw.append(bf_raw.copy())
+            self._bf_raw.append(bf_raw)
             n_heaps = len(self._bf_raw)
             if n_heaps % 100 == 0:
                 _logger.info('Received %d heaps', n_heaps)
@@ -247,14 +257,15 @@ class CaptureServer(object):
     Parameters
     ----------
     args : :class:`argparse.Namespace`
-        Command-line arguments. The following arguments are required:
+        Command-line arguments. The following arguments are required. Refer to
+        the script for documentation of these options.
 
-        cbf_channels
-          Total number of PFB channels, or ``None`` for unknown
-        cbf_spead
-          List of :class:`katsdptelstate.endpoint.Endpoint` for receiving SPEAD data
-        file_base
-          Directory in which to write files
+        - cbf_channels
+        - cbf_spead
+        - file_base
+        - buffer
+        - affinity
+
     loop : :class:`trollius.BaseEventLoop`
         IO Loop for running coroutines
 
