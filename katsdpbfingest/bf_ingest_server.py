@@ -70,7 +70,7 @@ class _CaptureSession(object):
             self._timestep = None
         self._ig = spead2.ItemGroup()
         if args.affinity:
-            spead2.ThreadPool.setaffinity(args.affinity[0])
+            spead2.ThreadPool.set_affinity(args.affinity[0])
             thread_pool = spead2.ThreadPool(1, [args.affinity[1 % len(args.affinity)]])
         else:
             thread_pool = spead2.ThreadPool()
