@@ -42,7 +42,8 @@ class BaseTestCaptureSession(object):
             cbf_channels=4096,
             cbf_spead=[endpoint.Endpoint('239.1.2.3', 7148)],
             file_base='/not_a_directory',
-            buffer=self.buffer)
+            buffer=self.buffer,
+            affinity=None)
         self.loop = trollius.get_event_loop()
         self._spead_patcher = mock.patch.object(
             spead2.recv.trollius.Stream, 'add_udp_reader', add_buffer_reader)
