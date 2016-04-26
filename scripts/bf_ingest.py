@@ -28,10 +28,12 @@ def main():
     parser.add_argument('--logging', '-l', type=str, metavar='LEVEL', default='INFO', help='log level')
     parser.add_argument('--file-base', default='.', type=str, help='base directory into which to write HDF5 files', metavar='DIR')
     parser.add_argument('--buffer', action='store_true', help='Buffer all data in memory during capture')
-    parser.add_argument('--affinity', type=spead2.parse_range_list, help='List of CPUs to which to bind threads')
+    parser.add_argument('--affinity', type=spead2.parse_range_list, help='List of CPUs to which to bind threads', metavar='CPU,CPU,CPU')
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
     args = parser.parse_args()
+    if args.affinity and len(args.affinity) < 3:
+        parser.error('At least 3 CPUs must be specified for --affinity')
     logging.basicConfig(level=args.logging, format='%(asctime)s %(levelname)s:%(name)s: %(message)s')
     if not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)

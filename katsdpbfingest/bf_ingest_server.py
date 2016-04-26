@@ -71,7 +71,7 @@ class _CaptureSession(object):
         self._ig = spead2.ItemGroup()
         if args.affinity:
             spead2.ThreadPool.set_affinity(args.affinity[0])
-            thread_pool = spead2.ThreadPool(1, [args.affinity[1 % len(args.affinity)]])
+            thread_pool = spead2.ThreadPool(1, [args.affinity[1]])
         else:
             thread_pool = spead2.ThreadPool()
         self._stream = spead2.recv.trollius.Stream(thread_pool, 0, ring_heaps=16, loop=self._loop)
@@ -105,7 +105,7 @@ class _CaptureSession(object):
         chunk_size = n_time * n_chans * 2 * dtype.itemsize
         if self._args.buffer:
             if self._args.affinity:
-                thread_pool = spead2.ThreadPool(1, [self._args.affinity[2 % len(self._args.affinity)]])
+                thread_pool = spead2.ThreadPool(1, [self._args.affinity[2]])
             else:
                 thread_pool = spead2.ThreadPool()
             memory_pool = spead2.MemoryPool(thread_pool, chunk_size, chunk_size + 4096, 16, 8, 7)
