@@ -337,6 +337,9 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
         """Start capture to file."""
         if self.capturing:
             return ('fail', 'already capturing')
+        stat = os.statvfs(self._args.file_base)
+        if stat.f_bavail / stat.f_blocks < 0.05:
+            return ('fail', 'less than 5% disk space free on {}'.format(os.path.abspath(self._args.file_base)))
         self.start_capture()
         return ('ok',)
 
