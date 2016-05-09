@@ -113,7 +113,7 @@ class _CaptureSession(object):
         n_chans, n_time = self._ig['bf_raw'].shape[0:2]
         dtype = self._ig['bf_raw'].dtype
         self._file = h5py.File(filename, mode='w')
-        self._file.attrs['version'] = 1
+        self._file.attrs['version'] = 2
         data_group = self._file.create_group('Data')
         shape = (n_chans, 0, 2)
         maxshape = (n_chans, None, 2)
@@ -216,7 +216,7 @@ class _CaptureSession(object):
             # Write the timestamps to file
             n_time = self._ig['bf_raw'].shape[1]
             ds = self._file['Data'].create_dataset(
-                'timestamp',
+                'timestamps',
                 shape=(n_time * len(self._timestamps),),
                 dtype=np.uint64)
             idx = 0
