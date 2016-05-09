@@ -220,6 +220,7 @@ class _CaptureSession(object):
                 shape=(n_time * len(self._timestamps),),
                 dtype=np.uint64)
             ds.attrs['timestamp_reference'] = 'start'
+            ds.attrs['timestamp_type'] = 'adc'
             idx = 0
             for timestamp in self._timestamps:
                 ds[idx : idx + n_time] = np.arange(
