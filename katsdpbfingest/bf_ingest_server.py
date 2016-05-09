@@ -4,6 +4,7 @@ import spead2.recv
 import spead2.recv.trollius
 import katcp
 from katcp.kattypes import request, return_reply
+from katsdpfilewriter import telescope_model, ar1_model, file_writer
 import h5py
 import numpy as np
 import time
@@ -197,6 +198,14 @@ class _CaptureSession(object):
         else:
             return self._write_heap(bf_raw)
 
+    def _write_metadata(self):
+        telstate = self._args.telstate
+        antenna_mask = telstate.get('config', {}).get('antenna_mask', '').split(',')
+        model = ar1_model.create_model(antenna_mask)
+        model_data = telescope_model.TelstateModelData(model, telstate, self._timestamps[0])
+        file_writer.set_telescope_model(self._file, model_data)
+        file_writer.set_telescope_state(self._file, telstate)
+
     def _finalise(self):
         self._stream.stop()
         if self._file:
@@ -216,6 +225,9 @@ class _CaptureSession(object):
                     timestamp, timestamp + n_time * self._timestep, self._timestep,
                     dtype=np.uint64)
                 idx += n_time
+            # Write the metadata to file
+            if self._args.telstate is not None and self._timestamps:
+                self._write_metadata()
             self._file.close()
             self._file = None
 
