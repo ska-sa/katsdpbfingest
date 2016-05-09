@@ -123,7 +123,7 @@ class BaseTestCaptureSession(object):
             expected[:, time, 1] = time % 255 - 128
         np.testing.assert_equal(expected, bf_raw)
 
-        timestamp = h5file['/Data/timestamp']
+        timestamp = h5file['/Data/timestamps']
         expected = 1234567890 + 2 * self.args.cbf_channels * np.arange(n_time * n_heaps)
         np.testing.assert_equal(expected, timestamp)
         h5file.really_close()
