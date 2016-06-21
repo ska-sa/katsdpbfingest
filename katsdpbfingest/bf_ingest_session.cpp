@@ -5,7 +5,6 @@
  * - finalise file on capture-stop instead of on capture-done
  *   (might require using a Python thread instead of a C++ thread)
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
- * - add ibverbs support with command-line option
  * - better logging
  */
 
@@ -295,6 +294,7 @@ struct session_config
     std::size_t buffer_size = 16 * 1024 * 1024;
     int live_heaps = 2;
     int ring_heaps = 64;
+    bool ibv = false;
     int comp_vector = 0;
     int network_affinity = -1;
 
@@ -422,9 +422,20 @@ void session::run()
     }
     else
     {
-        stream.emplace_reader<spead2::recv::udp_reader>(
-            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
-            config.interface_address);
+#if SPEAD2_USE_IBV
+        if (config.ibv)
+        {
+            stream.emplace_reader<spead2::recv::udp_ibv_reader>(
+                config.endpoint, config.interface_address,
+                spead2::recv::udp_ibv_reader::default_max_size,
+                config.buffer_size,
+                config.comp_vector);
+        }
+#endif
+        else
+            stream.emplace_reader<spead2::recv::udp_reader>(
+                config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
+                config.interface_address);
     }
 
     // Wait for metadata
@@ -554,6 +565,7 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         .def_readwrite("buffer_size", &session_config::buffer_size)
         .def_readwrite("live_heaps", &session_config::live_heaps)
         .def_readwrite("ring_heaps", &session_config::ring_heaps)
+        .def_readwrite("ibv", &session_config::ibv)
         .def_readwrite("comp_vector", &session_config::comp_vector)
         .def_readwrite("network_affinity", &session_config::network_affinity)
         .def_readwrite("disk_affinity", &session_config::disk_affinity)

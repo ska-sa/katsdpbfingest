@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--affinity', type=spead2.parse_range_list, help='List of CPUs to which to bind threads', metavar='CPU,CPU')
     parser.add_argument('--interface', type=str, help='Network interface for multicast subscription')
     parser.add_argument('--direct-io', action='store_true', help='Use Direct I/O VFD for writing the file')
+    parser.add_argument('--ibv', action='store_true', help='Use libibverbs when possible')
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
     args = parser.parse_args()

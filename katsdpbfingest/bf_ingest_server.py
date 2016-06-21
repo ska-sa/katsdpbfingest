@@ -62,6 +62,7 @@ class _CaptureSession(object):
         config = SessionConfig(self.filename, address, endpoint.port)
         if args.interface is not None:
             config.interface_address = _get_interface_address(args.interface)
+        config.ibv = args.ibv
         if args.cbf_channels:
             config.total_channels = args.cbf_channels
         else:
