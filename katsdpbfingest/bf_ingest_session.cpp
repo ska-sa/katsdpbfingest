@@ -2,12 +2,11 @@
  * - record more stats and expose them
  * - gracefully handle libhdf5 exceptions
  * - grow the file in batches, shrink again at end
- * - set the version attribute on the file
- * - set the attributes on the timestamp datasets
  * - finalise file on capture-stop instead of on capture-done
  *   (might require using a Python thread instead of a C++ thread)
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - add ibverbs support with command-line option
+ * - better logging
  */
 
 #include <memory>
@@ -128,6 +127,14 @@ public:
 
 constexpr hsize_t hdf5_timestamps_writer::chunk;
 
+static void set_string_attribute(H5::H5Object &location, const std::string &name, const std::string &value)
+{
+    H5::DataSpace scalar;
+    H5::StrType type(H5::PredType::C_S1, value.size());
+    H5::Attribute attribute = location.createAttribute(name, type, scalar);
+    attribute.write(type, value);
+}
+
 hdf5_timestamps_writer::hdf5_timestamps_writer(
     H5::CommonFG &parent, int spectra_per_dump,
     std::uint64_t timestamp_step, const char *name)
@@ -144,6 +151,8 @@ hdf5_timestamps_writer::hdf5_timestamps_writer(
     buffer = make_aligned<std::uint64_t>(chunk);
     n_buffer = 0;
     memory_space = H5::DataSpace(1, &chunk);
+    set_string_attribute(dataset, "timestamp_reference", "start");
+    set_string_attribute(dataset, "timestamp_type", "adc");
 }
 
 hdf5_timestamps_writer::~hdf5_timestamps_writer()
@@ -211,6 +220,17 @@ public:
         captured_timestamps(group, spectra_per_dump, timestamp_step, "captured_timestamps"),
         all_timestamps(group, spectra_per_dump, timestamp_step, "timestamps")
     {
+        H5::DataSpace scalar;
+        // 1.8.11 doesn't have the right C++ wrapper for this to work, so we
+        // duplicate its work
+        hid_t attr_id = H5Acreate2(
+            file.getId(), "version", H5::PredType::NATIVE_INT32.getId(),
+            scalar.getId(), H5P_DEFAULT, H5P_DEFAULT);
+        if (attr_id < 0)
+            throw H5::AttributeIException("createAttribute", "H5Acreate2 failed");
+        H5::Attribute version_attr(attr_id);
+        const std::int32_t version = 2;
+        version_attr.write(H5::PredType::NATIVE_INT32, &version);
     }
 
     void add(std::uint8_t *ptr, std::size_t length,
