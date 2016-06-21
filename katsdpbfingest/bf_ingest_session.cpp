@@ -456,6 +456,7 @@ void session::run()
 #if SPEAD2_USE_IBV
         if (config.ibv)
         {
+            std::cerr << "Using ibverbs\n";
             stream.emplace_reader<spead2::recv::udp_ibv_reader>(
                 config.endpoint, config.interface_address,
                 spead2::recv::udp_ibv_reader::default_max_size,
