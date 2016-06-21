@@ -7,9 +7,7 @@
  * - finalise file on capture-stop instead of on capture-done
  *   (might require using a Python thread instead of a C++ thread)
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
- * - remove --buffer command-line option
- * - add --direct command-line option
- * - switch back to using ibv_verbs, make interface_address optional
+ * - add ibverbs support with command-line option
  */
 
 #include <memory>
@@ -270,7 +268,7 @@ void hdf5_writer::add(std::uint8_t *ptr, std::size_t length,
 struct session_config
 {
     std::string filename;
-    boost::asio::ip::udp::endpoint multicast;
+    boost::asio::ip::udp::endpoint endpoint;
     boost::asio::ip::address interface_address;
     int total_channels = 4096;
 
@@ -283,17 +281,27 @@ struct session_config
     int disk_affinity = -1;
     bool direct = false;
 
-    session_config(const std::string &filename, const std::string &multicast_group, int port,
-                   const std::string interface_address);
+    session_config(const std::string &filename, const std::string &bind_host, int port);
+    std::string get_interface_address() const;
+    void set_interface_address(const std::string &address);
 };
 
-session_config::session_config(const std::string &filename, const std::string &multicast_group, int port,
-                               const std::string interface_address)
+session_config::session_config(const std::string &filename, const std::string &bind_host, int port)
     : filename(filename),
-    multicast(boost::asio::ip::address_v4::from_string(multicast_group), port),
-    interface_address(boost::asio::ip::address_v4::from_string(interface_address))
+    endpoint(boost::asio::ip::address_v4::from_string(bind_host), port)
 {
 }
+
+std::string session_config::get_interface_address() const
+{
+    return interface_address.to_string();
+}
+
+void session_config::set_interface_address(const std::string &address)
+{
+    interface_address = boost::asio::ip::address_v4::from_string(address);
+}
+
 
 class session
 {
@@ -387,8 +395,17 @@ void session::run()
         spead2::thread_pool::set_affinity(config.disk_affinity);
     std::shared_ptr<spead2::memory_allocator> allocator = std::make_shared<spead2::mmap_allocator>();
     stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
-    stream.emplace_reader<spead2::recv::udp_reader>(
-        config.multicast, spead2::recv::udp_reader::default_max_size, config.buffer_size);
+    if (!config.endpoint.address().is_multicast() || config.interface_address.is_unspecified())
+    {
+        stream.emplace_reader<spead2::recv::udp_reader>(
+            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size);
+    }
+    else
+    {
+        stream.emplace_reader<spead2::recv::udp_reader>(
+            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
+            config.interface_address);
+    }
 
     // Wait for metadata
     int channels = -1;
@@ -509,9 +526,10 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
     using namespace boost::python;
 
     class_<session_config>("SessionConfig",
-        init<const std::string &, const std::string &, int, const std::string &>(
-            (arg("filename"), arg("multicast_group"), arg("port"), arg("interface_address"))))
+        init<const std::string &, const std::string &, int>(
+            (arg("filename"), arg("multicast_group"), arg("port"))))
         .def_readwrite("filename", &session_config::filename)
+        .add_property("interface_address", &session_config::get_interface_address, &session_config::set_interface_address)
         .def_readwrite("total_channels", &session_config::total_channels)
         .def_readwrite("buffer_size", &session_config::buffer_size)
         .def_readwrite("live_heaps", &session_config::live_heaps)
@@ -525,7 +543,7 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         init<const session_config &>(arg("config")))
         .def("join", &session::join)
         .def("stop", &session::stop)
-        .def_readonly("n_dumps", &session::get_n_dumps)
-        .def_readonly("first_timestamp", &session::get_first_timestamp)
+        .add_property("n_dumps", &session::get_n_dumps)
+        .add_property("first_timestamp", &session::get_first_timestamp)
     ;
 }

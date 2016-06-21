@@ -43,28 +43,25 @@ class _CaptureSession(object):
 
     Attributes
     ----------
+    filename : :class:`str`
+        Filename of the HDF5 file written
     _args : :class:`argparse.Namespace`
         Command-line arguments passed to the constructor
     _loop : :class:`trollius.BaseEventLoop`
         Event loop passed to the constructor
-    _filename : :class:`str`
-        Filename of the HDF5 file written
     _session : :class:`katsdpingest._bf_ingest_session.Session`
         C++-driven capture session
     """
     def __init__(self, args, loop):
         self._loop = loop
         self._args = args
-        self._filename = os.path.join(args.file_base, '{}.h5'.format(int(time.time())))
+        self.filename = os.path.join(args.file_base, '{}.h5'.format(int(time.time())))
 
         endpoint = args.cbf_spead[0]  # TODO: make it a singleton
         address = socket.gethostbyname(endpoint.host)
-        # ipaddress module requires a unicode string
-        address_obj = ipaddress.ip_address(unicode(address, 'us-ascii'))
-        if not address_obj.is_multicast:
-            raise ValueError('Only multicast IP addresses are supported (not {})'.format(address))
-        interface_address = _get_interface_address(args.interface)
-        config = SessionConfig(self._filename, address, endpoint.port, interface_address)
+        config = SessionConfig(self.filename, address, endpoint.port)
+        if args.interface is not None:
+            config.interface_address = _get_interface_address(args.interface)
         if args.cbf_channels:
             config.total_channels = args.cbf_channels
         else:
@@ -72,7 +69,8 @@ class _CaptureSession(object):
         if args.affinity:
             config.disk_affinity = args.affinity[0]
             config.network_affinity = args.affinity[1]
-
+        if args.direct_io:
+            config.direct = True
         self._session = Session(config)
 
     def _write_metadata(self):
@@ -87,7 +85,7 @@ class _CaptureSession(object):
         antenna_mask = telstate.get('config', {}).get('antenna_mask', '').split(',')
         model = ar1_model.create_model(antenna_mask)
         model_data = telescope_model.TelstateModelData(model, telstate, first_timestamp)
-        h5file = h5py.File(self._filename, 'r+')
+        h5file = h5py.File(self.filename, 'r+')
         with contextlib.closing(h5file):
             file_writer.set_telescope_model(h5file, model_data)
             file_writer.set_telescope_state(h5file, telstate)
@@ -156,6 +154,7 @@ class CaptureServer(object):
         """Start capture to file, if not already in progress."""
         if self._capture is None:
             self._capture = _CaptureSession(self._args, self._loop)
+            return self._capture.filename
 
     @trollius.coroutine
     def stop_capture(self):
