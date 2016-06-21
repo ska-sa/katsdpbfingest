@@ -21,6 +21,7 @@ import ipaddress
 import netifaces
 import socket
 import contextlib
+import concurrent.futures
 
 
 _logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ class _CaptureSession(object):
         Event loop passed to the constructor
     _session : :class:`katsdpingest._bf_ingest_session.Session`
         C++-driven capture session
+    _run_future : :class:`trollius.Task`
+        Task for the coroutine that waits for the C++ code and finalises
     """
     def __init__(self, args, loop):
         self._loop = loop
@@ -73,6 +76,7 @@ class _CaptureSession(object):
         if args.direct_io:
             config.direct = True
         self._session = Session(config)
+        self._run_future = trollius.async(self._run(), loop=self._loop)
 
     def _write_metadata(self):
         telstate = self._args.telstate
@@ -91,23 +95,23 @@ class _CaptureSession(object):
             file_writer.set_telescope_model(h5file, model_data)
             file_writer.set_telescope_state(h5file, telstate)
 
-    def _finalise(self):
-        self._session.stop()
+    def _run(self):
+        pool = concurrent.futures.ThreadPoolExecutor(1)
+        yield From(self._loop.run_in_executor(pool, self._session.join))
         if self._session.n_dumps > 0:
             # Write the metadata to file
             if self._args.telstate is not None:
                 self._write_metadata()
         # TODO: log statistics
         _logger.info('Capture complete, %d heaps', self._session.n_dumps)
-        self._session = None
 
     @trollius.coroutine
     def stop(self):
-        """Shut down the stream and wait for the session. This
+        """Shut down the stream and wait for the session to end. This
         is a coroutine.
         """
-        yield From(self._loop.run_in_executor(None, self._finalise))
-
+        self._session.stop_stream()
+        yield From(self._run_future)
 
 class CaptureServer(object):
     """Beamformer capture. This contains all the core functionality of the

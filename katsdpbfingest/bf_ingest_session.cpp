@@ -2,8 +2,6 @@
  * - record more stats and expose them
  * - gracefully handle libhdf5 exceptions
  * - grow the file in batches, shrink again at end
- * - finalise file on capture-stop instead of on capture-done
- *   (might require using a Python thread instead of a C++ thread)
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - better logging
  */
@@ -32,6 +30,38 @@
 namespace py = boost::python;
 
 constexpr int ALIGNMENT = 4096;
+
+/// Duplicate of the version in spead2.
+class release_gil
+{
+private:
+    PyThreadState *save = nullptr;
+
+public:
+    release_gil()
+    {
+        release();
+    }
+
+    ~release_gil()
+    {
+        if (save != nullptr)
+            PyEval_RestoreThread(save);
+    }
+
+    void release()
+    {
+        assert(save == nullptr);
+        save = PyEval_SaveThread();
+    }
+
+    void acquire()
+    {
+        assert(save != nullptr);
+        PyEval_RestoreThread(save);
+        save = nullptr;
+    }
+};
 
 // Suppresses all spead2 logging
 struct logger
@@ -339,10 +369,10 @@ private:
 
 public:
     explicit session(const session_config &config);
-    ~session() { stop(); }
+    ~session() { stop_stream(); join(); }
 
     void join();
-    void stop();
+    void stop_stream();
 
     std::uint64_t get_n_dumps() const;
     std::int64_t get_first_timestamp() const;
@@ -366,14 +396,15 @@ session::session(const session_config &config) :
 
 void session::join()
 {
+    release_gil gil;
     if (run_thread.joinable())
         run_thread.join();
 }
 
-void session::stop()
+void session::stop_stream()
 {
+    release_gil gil;
     stream.stop();
-    join();
 }
 
 // Parse the shape from either the shape field or the numpy header
@@ -574,7 +605,7 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
     class_<session, boost::noncopyable>("Session",
         init<const session_config &>(arg("config")))
         .def("join", &session::join)
-        .def("stop", &session::stop)
+        .def("stop_stream", &session::stop_stream)
         .add_property("n_dumps", &session::get_n_dumps)
         .add_property("first_timestamp", &session::get_first_timestamp)
     ;
