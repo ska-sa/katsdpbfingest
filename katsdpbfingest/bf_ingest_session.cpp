@@ -1,3 +1,17 @@
+/* Still TODO:
+ * - record more stats and expose them
+ * - gracefully handle libhdf5 exceptions
+ * - grow the file in batches, shrink again at end
+ * - set the version attribute on the file
+ * - set the attributes on the timestamp datasets
+ * - finalise file on capture-stop instead of on capture-done
+ *   (might require using a Python thread instead of a C++ thread)
+ * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
+ * - remove --buffer command-line option
+ * - add --direct command-line option
+ * - switch back to using ibv_verbs, make interface_address optional
+ */
+
 #include <memory>
 #include <algorithm>
 #include <vector>
@@ -83,7 +97,6 @@ void hdf5_bf_raw_writer::add(std::uint8_t *ptr, std::size_t length, std::uint64_
     assert(length == 2U * channels * spectra_per_dump);
     hssize_t time_idx = dump_idx * spectra_per_dump;
     hsize_t new_size[3] = {hsize_t(channels), hsize_t(time_idx) + spectra_per_dump, 2};
-    // TODO: batch these extensions
     dataset.extend(new_size);
     dataset.getSpace().extentCopy(file_space);
     hsize_t chunk[3] = {hsize_t(channels), hsize_t(spectra_per_dump), 2};
@@ -289,6 +302,8 @@ private:
     spead2::thread_pool worker;
     spead2::recv::ring_stream<> stream;
     std::thread run_thread;
+    std::uint64_t n_dumps = 0;
+    std::int64_t first_timestamp = -1;
 
     static std::vector<int> affinity_vector(int affinity);
 
@@ -300,6 +315,9 @@ public:
 
     void join();
     void stop();
+
+    std::uint64_t get_n_dumps() const;
+    std::int64_t get_first_timestamp() const;
 };
 
 std::vector<int> session::affinity_vector(int affinity)
@@ -422,7 +440,6 @@ void session::run()
     stream.set_memory_pool(pool);
 
     std::int64_t first_timestamp = -1;
-    std::uint64_t received = 0;
     hdf5_writer w(config.filename, config.direct, channels, spectra_per_dump, 2 * config.total_channels);
 
     while (true)
@@ -455,10 +472,10 @@ void session::run()
                     std::cerr << "timestamp is not properly aligned, discarding\n";
                     continue;
                 }
-                received++;
+                n_dumps++;
                 std::uint64_t dump_idx = (timestamp - first_timestamp) / dump_step;
-                if (received % 1024 == 0)
-                    std::cout << "Received " << received << '/' << dump_idx + 1 << " (" << dump_idx + 1 - received << " dropped)" << std::endl;
+                if (n_dumps % 1024 == 0)
+                    std::cout << "Received " << n_dumps << '/' << dump_idx + 1 << " (" << dump_idx + 1 - n_dumps << " dropped)" << std::endl;
                 if (data_item->length != payload_size)
                     std::cerr << "size mismatch: " << data_item->length
                         << " != " << payload_size << '\n';
@@ -471,6 +488,20 @@ void session::run()
         }
     }
     stream.stop();
+}
+
+std::uint64_t session::get_n_dumps() const
+{
+    if (run_thread.joinable())
+        throw std::runtime_error("cannot retrieve n_dumps while running");
+    return n_dumps;
+}
+
+std::int64_t session::get_first_timestamp() const
+{
+    if (run_thread.joinable())
+        throw std::runtime_error("cannot retrieve n_dumps while running");
+    return first_timestamp;
 }
 
 BOOST_PYTHON_MODULE(_bf_ingest_session)
@@ -494,5 +525,7 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         init<const session_config &>(arg("config")))
         .def("join", &session::join)
         .def("stop", &session::stop)
+        .def_readonly("n_dumps", &session::get_n_dumps)
+        .def_readonly("first_timestamp", &session::get_first_timestamp)
     ;
 }
