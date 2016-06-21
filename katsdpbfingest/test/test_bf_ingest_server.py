@@ -26,6 +26,7 @@ class TestCaptureSession(object):
             cbf_spead=[endpoint.Endpoint('239.1.2.3', 8888)],
             file_base=self.tmpdir,
             direct_io=False,
+            ibv=False,
             affinity=None, interface=None, telstate=None)
         self.loop = trollius.get_event_loop()
 
