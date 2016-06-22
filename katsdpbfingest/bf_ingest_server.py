@@ -95,6 +95,7 @@ class _CaptureSession(object):
             file_writer.set_telescope_model(h5file, model_data)
             file_writer.set_telescope_state(h5file, telstate)
 
+    @trollius.coroutine
     def _run(self):
         pool = concurrent.futures.ThreadPoolExecutor(1)
         yield From(self._loop.run_in_executor(pool, self._session.join))
