@@ -332,9 +332,9 @@ struct session_config
     boost::asio::ip::address interface_address;
     int total_channels = 4096;
 
-    std::size_t buffer_size = 16 * 1024 * 1024;
+    std::size_t buffer_size = 32 * 1024 * 1024;
     int live_heaps = 2;
-    int ring_heaps = 64;
+    int ring_heaps = 128;
     bool ibv = false;
     int comp_vector = 0;
     int network_affinity = -1;
