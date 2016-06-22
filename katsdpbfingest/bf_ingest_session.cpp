@@ -261,6 +261,13 @@ public:
         if (attr_id < 0)
             throw H5::AttributeIException("createAttribute", "H5Acreate2 failed");
         H5::Attribute version_attr(attr_id);
+        /* Release the ref created by H5Acreate2 (version_attr has its own).
+         * HDF5 1.8.11 has a bug where version_attr doesn't get its own
+         * reference, so to handle both cases we have to check the current
+         * value.
+         */
+        if (version_attr.getCounter() > 1)
+            version_attr.decRefCount();
         const std::int32_t version = 2;
         version_attr.write(H5::PredType::NATIVE_INT32, &version);
     }
@@ -295,6 +302,7 @@ H5::FileAccPropList hdf5_writer::make_fapl(bool direct)
     if (H5Pset_libver_bounds(fapl.getId(), version, version) < 0)
         throw H5::PropListIException("FileAccPropList::setLibverBounds", "H5Pset_libver_bounds failed");
     fapl.setAlignment(ALIGNMENT, ALIGNMENT);
+    fapl.setFcloseDegree(H5F_CLOSE_SEMI);
     return fapl;
 }
 
