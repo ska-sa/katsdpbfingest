@@ -6,6 +6,9 @@
  * - better logging
  * - monitor free disk space, stop when full; check disk space on startup
  * - make Python code more robust to the file being corrupt
+ * - use H5DOwrite_chunk for timestamps too
+ * - use low-level routines instead of H5DOwrite_chunk, to avoid continually
+ *   recreating DXPL
  */
 
 #include <memory>
@@ -201,7 +204,7 @@ void hdf5_timestamps_writer::flush()
     file_space.selectHyperslab(H5S_SELECT_SET, &n_buffer, &n_written);
     if (n_buffer == chunk)
     {
-        // This is the common space, and I'm just guessing that it might
+        // This is the common case, and I'm just guessing that it might
         // be faster. The else branch would still be valid.
         memory_space.selectAll();
     }
