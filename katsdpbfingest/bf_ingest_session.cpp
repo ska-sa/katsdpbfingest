@@ -4,6 +4,8 @@
  * - grow the file in batches, shrink again at end
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - better logging
+ * - monitor free disk space, stop when full; check disk space on startup
+ * - make Python code more robust to the file being corrupt
  */
 
 #include <memory>
