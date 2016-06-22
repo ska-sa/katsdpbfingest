@@ -27,6 +27,7 @@
 #include <system_error>
 #include <cstdlib>
 #include <H5Cpp.h>
+#include <hdf5_hl.h>
 #include <boost/python.hpp>
 
 namespace py = boost::python;
@@ -94,8 +95,6 @@ class hdf5_bf_raw_writer
 private:
     const int channels;
     const int spectra_per_dump;
-    H5::DataSpace file_space;
-    H5::DataSpace memory_space;
     H5::DataSet dataset;
 
 public:
@@ -112,12 +111,10 @@ hdf5_bf_raw_writer::hdf5_bf_raw_writer(H5::CommonFG &parent, int channels, int s
     hsize_t dims[3] = {hsize_t(channels), 0, 2};
     hsize_t maxdims[3] = {hsize_t(channels), H5S_UNLIMITED, 2};
     hsize_t chunk[3] = {hsize_t(channels), hsize_t(spectra_per_dump), 2};
-    file_space = H5::DataSpace(3, dims, maxdims);
+    H5::DataSpace file_space(3, dims, maxdims);
     H5::DSetCreatPropList dcpl;
     dcpl.setChunk(3, chunk);
     dataset = parent.createDataSet(name, H5::PredType::STD_I8BE, file_space, dcpl);
-    memory_space = H5::DataSpace(3, chunk);
-    memory_space.selectAll();
 }
 
 void hdf5_bf_raw_writer::add(std::uint8_t *ptr, std::size_t length, std::uint64_t dump_idx)
@@ -126,11 +123,15 @@ void hdf5_bf_raw_writer::add(std::uint8_t *ptr, std::size_t length, std::uint64_
     hssize_t time_idx = dump_idx * spectra_per_dump;
     hsize_t new_size[3] = {hsize_t(channels), hsize_t(time_idx) + spectra_per_dump, 2};
     dataset.extend(new_size);
-    dataset.getSpace().extentCopy(file_space);
-    hsize_t chunk[3] = {hsize_t(channels), hsize_t(spectra_per_dump), 2};
-    hsize_t start[3] = {0, hsize_t(time_idx), 0};
-    file_space.selectHyperslab(H5S_SELECT_SET, chunk, start);
-    dataset.write(ptr, H5::PredType::STD_I8BE, memory_space, file_space);
+    hsize_t offset[3] = {0, hsize_t(time_idx), 0};
+    // C++ API doesn't wrap H5DOwrite_chunk
+    herr_t result = H5DOwrite_chunk(
+        dataset.getId(),
+        H5P_DEFAULT,
+        0,
+        offset, length, ptr);
+    if (result < 0)
+        throw H5::DataSetIException("hdf5_bf_raw_writer::add", "H5DOwrite_chunk failed");
 }
 
 class hdf5_timestamps_writer
