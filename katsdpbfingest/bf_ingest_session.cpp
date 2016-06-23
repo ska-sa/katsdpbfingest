@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <utility>
 #include <future>
 #include <unistd.h>
 #include <boost/lexical_cast.hpp>
