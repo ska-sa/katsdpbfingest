@@ -1,6 +1,8 @@
 /* Still TODO:
  * - record more stats and expose them
- * - gracefully handle libhdf5 exceptions
+ * - improve libhdf5 exception handling:
+ *   - put full backtrace into exception object
+ *   - debug segfault in exit handlers
  * - grow the file in batches, shrink again at end
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - better logging
@@ -16,6 +18,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <future>
 #include <unistd.h>
 #include <boost/lexical_cast.hpp>
 #include <boost/regex.hpp>
@@ -37,12 +40,6 @@
 namespace py = boost::python;
 
 constexpr int ALIGNMENT = 4096;
-
-// Suppresses all spead2 logging
-struct logger
-{
-    void operator()(spead2::log_level, const std::string &) {}
-};
 
 template<typename T>
 struct free_delete
@@ -161,7 +158,7 @@ hdf5_timestamps_writer::hdf5_timestamps_writer(
 
 hdf5_timestamps_writer::~hdf5_timestamps_writer()
 {
-    if (n_buffer > 0)
+    if (!std::uncaught_exception() && n_buffer > 0)
         flush();
 }
 
@@ -342,17 +339,18 @@ private:
     const session_config config;
     spead2::thread_pool worker;
     spead2::recv::ring_stream<> stream;
-    std::thread run_thread;
+    std::future<void> run_future;
     std::uint64_t n_dumps = 0;
     std::int64_t first_timestamp = -1;
 
     static std::vector<int> affinity_vector(int affinity);
 
-    void run(); // runs in a separate thread
+    void run_impl();  // internal implementation of run
+    void run();       // runs in a separate thread
 
 public:
     explicit session(const session_config &config);
-    ~session() { stop_stream(); join(); }
+    ~session() { stream.stop(); }
 
     void join();
     void stop_stream();
@@ -373,15 +371,22 @@ session::session(const session_config &config) :
     config(config),
     worker(1, affinity_vector(config.network_affinity)),
     stream(worker, 0, config.live_heaps, config.ring_heaps),
-    run_thread(std::bind(&session::run, this))
+    run_future(std::async(std::launch::async, &session::run, this))
 {
 }
 
 void session::join()
 {
     spead2::release_gil gil;
-    if (run_thread.joinable())
-        run_thread.join();
+    if (run_future.valid())
+    {
+        run_future.wait();
+        // The run function should have done this, but if it exited by
+        // exception then it won't. It's idempotent, so call it again
+        // to be sure.
+        stream.stop();
+        run_future.get(); // this can throw an exception
+    }
 }
 
 void session::stop_stream()
@@ -424,6 +429,19 @@ static std::vector<spead2::s_item_pointer_t> get_shape(const spead2::descriptor 
 }
 
 void session::run()
+{
+    try
+    {
+        H5::Exception::dontPrint();
+        run_impl();
+    }
+    catch (H5::Exception &e)
+    {
+        throw std::runtime_error(e.getFuncName() + ": " + e.getDetailMsg());
+    }
+}
+
+void session::run_impl()
 {
     if (config.disk_affinity >= 0)
         spead2::thread_pool::set_affinity(config.disk_affinity);
@@ -555,14 +573,14 @@ void session::run()
 
 std::uint64_t session::get_n_dumps() const
 {
-    if (run_thread.joinable())
+    if (run_future.valid())
         throw std::runtime_error("cannot retrieve n_dumps while running");
     return n_dumps;
 }
 
 std::int64_t session::get_first_timestamp() const
 {
-    if (run_thread.joinable())
+    if (run_future.valid())
         throw std::runtime_error("cannot retrieve n_dumps while running");
     return first_timestamp;
 }

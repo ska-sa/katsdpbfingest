@@ -98,13 +98,16 @@ class _CaptureSession(object):
     @trollius.coroutine
     def _run(self):
         pool = concurrent.futures.ThreadPoolExecutor(1)
-        yield From(self._loop.run_in_executor(pool, self._session.join))
-        if self._session.n_dumps > 0:
-            # Write the metadata to file
-            if self._args.telstate is not None:
-                self._write_metadata()
-        # TODO: log statistics
-        _logger.info('Capture complete, %d heaps', self._session.n_dumps)
+        try:
+            yield From(self._loop.run_in_executor(pool, self._session.join))
+            if self._session.n_dumps > 0:
+                # Write the metadata to file
+                if self._args.telstate is not None:
+                    self._write_metadata()
+            # TODO: log statistics
+            _logger.info('Capture complete, %d heaps', self._session.n_dumps)
+        except Exception as e:
+            _logger.error("Capture threw exception", exc_info=True)
 
     @trollius.coroutine
     def stop(self):
