@@ -6,7 +6,6 @@
  * - grow the file in batches, shrink again at end
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - better logging
- * - monitor free disk space, stop when full; check disk space on startup
  * - make Python code more robust to the file being corrupt
  * - use H5DOwrite_chunk for timestamps too
  * - use low-level routines instead of H5DOwrite_chunk, to avoid continually
@@ -31,7 +30,9 @@
 #include "common_thread_pool.h"
 #include "py_common.h"
 #include <sys/mman.h>
+#include <sys/vfs.h>
 #include <system_error>
+#include <cerrno>
 #include <cstdlib>
 #include <H5Cpp.h>
 #include <hdf5_hl.h>
@@ -244,6 +245,8 @@ public:
     void add(std::uint8_t *ptr, std::size_t length,
              std::uint64_t timestamp, std::uint64_t dump_idx,
              spead2::recv::heap &&heap);
+
+    int get_fd() const;
 };
 
 H5::FileAccPropList hdf5_writer::make_fapl(bool direct)
@@ -291,6 +294,13 @@ void hdf5_writer::add(std::uint8_t *ptr, std::size_t length,
     }
     captured_timestamps.add(timestamp);
     bf_raw.add(ptr, length, dump_idx);
+}
+
+int hdf5_writer::get_fd() const
+{
+    void *fd_ptr;
+    file.getVFDHandle(&fd_ptr);
+    return *reinterpret_cast<int *>(fd_ptr);
 }
 
 
@@ -522,6 +532,11 @@ void session::run_impl()
 
     std::int64_t first_timestamp = -1;
     hdf5_writer w(config.filename, config.direct, channels, spectra_per_dump, 2 * config.total_channels);
+    int fd = w.get_fd();
+    struct statfs stat;
+    if (fstatfs(fd, &stat) < 0)
+        throw std::system_error(errno, std::system_category(), "fstatfs failed");
+    std::size_t reserve_blocks = (1024 * 1024 * 1024 + 1024 * payload_size) / stat.f_bsize;
 
     while (true)
     {
@@ -553,14 +568,26 @@ void session::run_impl()
                     std::cerr << "timestamp is not properly aligned, discarding\n";
                     continue;
                 }
-                n_dumps++;
-                std::uint64_t dump_idx = (timestamp - first_timestamp) / dump_step;
-                if (n_dumps % 1024 == 0)
-                    std::cout << "Received " << n_dumps << '/' << dump_idx + 1 << " (" << dump_idx + 1 - n_dumps << " dropped)" << std::endl;
                 if (data_item->length != payload_size)
+                {
                     std::cerr << "size mismatch: " << data_item->length
                         << " != " << payload_size << '\n';
+                    continue;
+                }
+                n_dumps++;
+                std::uint64_t dump_idx = (timestamp - first_timestamp) / dump_step;
                 w.add(data_item->ptr, data_item->length, timestamp, dump_idx, std::move(fh));
+                if (n_dumps % 1024 == 0)
+                {
+                    std::cout << "Received " << n_dumps << '/' << dump_idx + 1 << " (" << dump_idx + 1 - n_dumps << " dropped)" << std::endl;
+                    if (fstatfs(fd, &stat) < 0)
+                        throw std::system_error(errno, std::system_category(), "fstatfs failed");
+                    if (stat.f_bavail < reserve_blocks)
+                    {
+                        std::cerr << "Stopping capture due to lack of free space\n";
+                        break;
+                    }
+                }
             }
         }
         catch (spead2::ringbuffer_stopped &e)
