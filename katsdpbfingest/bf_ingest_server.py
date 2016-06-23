@@ -104,8 +104,9 @@ class _CaptureSession(object):
                 # Write the metadata to file
                 if self._args.telstate is not None:
                     self._write_metadata()
-            # TODO: log statistics
-            _logger.info('Capture complete, %d heaps', self._session.n_dumps)
+            _logger.info('Capture complete, %d heaps, of which %d dropped',
+                         self._session.n_total_dumps,
+                         self._session.n_total_dumps - self._session.n_dumps)
         except Exception as e:
             _logger.error("Capture threw exception", exc_info=True)
 

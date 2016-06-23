@@ -1,10 +1,9 @@
 /* Still TODO:
- * - record more stats and expose them
  * - improve libhdf5 exception handling:
  *   - put full backtrace into exception object
  *   - debug segfault in exit handlers
- * - grow the file in batches, shrink again at end
- * - make Python code more robust to the file being corrupt
+ * - grow the file in batches, shrink again at end?
+ * - make Python code more robust to the file being corrupt?
  */
 
 #include <memory>
@@ -359,6 +358,7 @@ private:
     spead2::recv::ring_stream<> stream;
     std::future<void> run_future;
     std::uint64_t n_dumps = 0;
+    std::uint64_t n_total_dumps = 0;
     std::int64_t first_timestamp = -1;
 
     static std::vector<int> affinity_vector(int affinity);
@@ -374,6 +374,7 @@ public:
     void stop_stream();
 
     std::uint64_t get_n_dumps() const;
+    std::uint64_t get_n_total_dumps() const;
     std::int64_t get_first_timestamp() const;
 };
 
@@ -614,7 +615,7 @@ void session::run_impl()
                 }
                 n_dumps++;
                 std::uint64_t dump_idx = (timestamp - first_timestamp) / dump_step;
-                std::uint64_t n_total_dumps = dump_idx + 1;
+                n_total_dumps = std::max(n_total_dumps, dump_idx + 1);
                 w.add(data_item->ptr, data_item->length, timestamp, dump_idx, std::move(fh));
                 if (n_total_dumps % 1000 == 0)
                 {
@@ -643,6 +644,13 @@ std::uint64_t session::get_n_dumps() const
     if (run_future.valid())
         throw std::runtime_error("cannot retrieve n_dumps while running");
     return n_dumps;
+}
+
+std::uint64_t session::get_n_total_dumps() const
+{
+    if (run_future.valid())
+        throw std::runtime_error("cannot retrieve n_total_dumps while running");
+    return n_total_dumps;
 }
 
 std::int64_t session::get_first_timestamp() const
@@ -676,6 +684,7 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         .def("join", &session::join)
         .def("stop_stream", &session::stop_stream)
         .add_property("n_dumps", &session::get_n_dumps)
+        .add_property("n_total_dumps", &session::get_n_total_dumps)
         .add_property("first_timestamp", &session::get_first_timestamp)
     ;
 
