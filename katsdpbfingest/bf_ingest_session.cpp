@@ -7,7 +7,6 @@
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - better logging
  * - make Python code more robust to the file being corrupt
- * - use direct chunk writes for timestamps
  */
 
 #include <memory>
