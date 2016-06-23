@@ -117,9 +117,8 @@ class hdf5_timestamps_writer
 {
 private:
     static constexpr hsize_t chunk = 1048576;
-    H5::DataSpace file_space;
-    H5::DataSpace memory_space;
     H5::DataSet dataset;
+    H5::DSetMemXferPropList dxpl;
     std::unique_ptr<std::uint64_t[], free_delete<std::uint64_t>> buffer;
     hsize_t n_buffer = 0;
     hsize_t n_written = 0;
@@ -149,19 +148,19 @@ static void set_string_attribute(H5::H5Object &location, const std::string &name
 hdf5_timestamps_writer::hdf5_timestamps_writer(
     H5::CommonFG &parent, int spectra_per_dump,
     std::uint64_t timestamp_step, const char *name)
-    : spectra_per_dump(spectra_per_dump),
+    : dxpl(make_dxpl_direct(chunk * sizeof(std::uint64_t))),
+    spectra_per_dump(spectra_per_dump),
     timestamp_step(timestamp_step)
 {
     hsize_t dims[1] = {0};
     hsize_t maxdims[1] = {H5S_UNLIMITED};
-    file_space = H5::DataSpace(1, dims, maxdims);
+    H5::DataSpace file_space(1, dims, maxdims);
     H5::DSetCreatPropList dcpl;
     dcpl.setChunk(1, &chunk);
     dataset = parent.createDataSet(
         name, H5::PredType::NATIVE_UINT64, file_space, dcpl);
     buffer = make_aligned<std::uint64_t>(chunk);
     n_buffer = 0;
-    memory_space = H5::DataSpace(1, &chunk);
     set_string_attribute(dataset, "timestamp_reference", "start");
     set_string_attribute(dataset, "timestamp_type", "adc");
 }
@@ -176,24 +175,16 @@ void hdf5_timestamps_writer::flush()
 {
     hsize_t new_size = n_written + n_buffer;
     dataset.extend(&new_size);
-    dataset.getSpace().extentCopy(file_space);
-    file_space.selectHyperslab(H5S_SELECT_SET, &n_buffer, &n_written);
-    if (n_buffer == chunk)
+    const hsize_t offset[1] = {n_written};
+    const hsize_t *offset_ptr = offset;
+    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_OFFSET_NAME, &offset_ptr);
+    if (n_buffer < chunk)
     {
-        // This is the common case, and I'm just guessing that it might
-        // be faster. The else branch would still be valid.
-        memory_space.selectAll();
+        // Pad extra space with zeros - shouldn't matter, but this case
+        // only arises when closing the file so should be cheap
+        std::memset(buffer.get() + n_buffer, 0, (chunk - n_buffer) * sizeof(std::uint64_t));
     }
-    else
-    {
-        hsize_t start = 0;
-        memory_space.selectHyperslab(H5S_SELECT_SET, &n_buffer, &start);
-    }
-    dataset.write(
-        buffer.get(),
-        H5::PredType::NATIVE_UINT64,
-        memory_space, file_space);
-
+    dataset.write(buffer.get(), H5::PredType::NATIVE_UINT64, H5S_ALL, H5S_ALL, dxpl);
     n_written += n_buffer;
     n_buffer = 0;
 }
