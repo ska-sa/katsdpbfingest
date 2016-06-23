@@ -62,12 +62,21 @@ static std::unique_ptr<T[], free_delete<T>> make_aligned(std::size_t elements)
  * doing it directly actually makes it easier to do things using the C++ API,
  * as well as avoiding the need to continually flip the flag on and off.
  */
-static H5::DSetMemXferPropList make_dxpl_direct(std::uint32_t size)
+static H5::DSetMemXferPropList make_dxpl_direct(std::size_t size)
 {
     hbool_t direct_write = true;
     H5::DSetMemXferPropList dxpl;
     dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_FLAG_NAME, &direct_write);
-    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME, &size);
+    // The size of this property changed somewhere between 1.8.11 and 1.8.17
+    std::size_t property_size = dxpl.getPropSize(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME);
+    if (property_size == sizeof(size))
+        dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME, &size);
+    else if (property_size == sizeof(std::uint32_t))
+    {
+        std::uint32_t size32 = size;
+        assert(size32 == size);
+        dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME, &size32);
+    }
     return dxpl;
 }
 
@@ -441,7 +450,7 @@ void session::run()
 {
     try
     {
-        H5::Exception::dontPrint();
+        //H5::Exception::dontPrint();
         run_impl();
     }
     catch (H5::Exception &e)
