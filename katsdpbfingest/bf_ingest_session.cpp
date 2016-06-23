@@ -7,9 +7,7 @@
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - better logging
  * - make Python code more robust to the file being corrupt
- * - use H5DOwrite_chunk for timestamps too
- * - use low-level routines instead of H5DOwrite_chunk, to avoid continually
- *   recreating DXPL
+ * - use direct chunk writes for timestamps
  */
 
 #include <memory>
@@ -35,7 +33,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <H5Cpp.h>
-#include <hdf5_hl.h>
 #include <boost/python.hpp>
 
 namespace py = boost::python;
@@ -60,12 +57,28 @@ static std::unique_ptr<T[], free_delete<T>> make_aligned(std::size_t elements)
     return std::unique_ptr<T[], free_delete<T>>(static_cast<T*>(ptr));
 }
 
+/**
+ * Creates a dataset transfer property list that can be used for writing chunks
+ * of size @a size. It is based on examining the code for H5DOwrite_chunk, but
+ * doing it directly actually makes it easier to do things using the C++ API,
+ * as well as avoiding the need to continually flip the flag on and off.
+ */
+static H5::DSetMemXferPropList make_dxpl_direct(std::uint32_t size)
+{
+    hbool_t direct_write = true;
+    H5::DSetMemXferPropList dxpl;
+    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_FLAG_NAME, &direct_write);
+    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME, &size);
+    return dxpl;
+}
+
 class hdf5_bf_raw_writer
 {
 private:
     const int channels;
     const int spectra_per_dump;
     H5::DataSet dataset;
+    H5::DSetMemXferPropList dxpl;
 
 public:
     hdf5_bf_raw_writer(H5::CommonFG &parent, int channels, int spectra_per_dump,
@@ -76,7 +89,8 @@ public:
 
 hdf5_bf_raw_writer::hdf5_bf_raw_writer(H5::CommonFG &parent, int channels, int spectra_per_dump,
                                        const char *name)
-    : channels(channels), spectra_per_dump(spectra_per_dump)
+    : channels(channels), spectra_per_dump(spectra_per_dump),
+    dxpl(make_dxpl_direct(channels * spectra_per_dump * 2))
 {
     hsize_t dims[3] = {hsize_t(channels), 0, 2};
     hsize_t maxdims[3] = {hsize_t(channels), H5S_UNLIMITED, 2};
@@ -93,15 +107,10 @@ void hdf5_bf_raw_writer::add(std::uint8_t *ptr, std::size_t length, std::uint64_
     hssize_t time_idx = dump_idx * spectra_per_dump;
     hsize_t new_size[3] = {hsize_t(channels), hsize_t(time_idx) + spectra_per_dump, 2};
     dataset.extend(new_size);
-    hsize_t offset[3] = {0, hsize_t(time_idx), 0};
-    // C++ API doesn't wrap H5DOwrite_chunk
-    herr_t result = H5DOwrite_chunk(
-        dataset.getId(),
-        H5P_DEFAULT,
-        0,
-        offset, length, ptr);
-    if (result < 0)
-        throw H5::DataSetIException("hdf5_bf_raw_writer::add", "H5DOwrite_chunk failed");
+    const hsize_t offset[3] = {0, hsize_t(time_idx), 0};
+    const hsize_t *offset_ptr = offset;
+    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_OFFSET_NAME, &offset_ptr);
+    dataset.write(ptr, H5::PredType::STD_I8BE, H5::DataSpace::ALL, H5::DataSpace::ALL, dxpl);
 }
 
 class hdf5_timestamps_writer
