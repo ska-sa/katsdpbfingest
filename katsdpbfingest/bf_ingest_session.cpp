@@ -5,7 +5,6 @@
  *   - debug segfault in exit handlers
  * - grow the file in batches, shrink again at end
  * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
- * - better logging
  * - make Python code more robust to the file being corrupt
  */
 
@@ -36,7 +35,8 @@
 
 namespace py = boost::python;
 
-constexpr int ALIGNMENT = 4096;
+static constexpr int ALIGNMENT = 4096;
+static spead2::log_function_python logger;
 
 template<typename T>
 struct free_delete
@@ -465,28 +465,58 @@ void session::run_impl()
         spead2::thread_pool::set_affinity(config.disk_affinity);
     std::shared_ptr<spead2::memory_allocator> allocator = std::make_shared<spead2::mmap_allocator>();
     stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
-    if (!config.endpoint.address().is_multicast() || config.interface_address.is_unspecified())
+    bool use_ibv = false;
+    if (config.ibv)
     {
+#if !SPEAD2_USE_IBV
+        if (true)
+        {
+            logger(spead2::log_level::warning, "Not using ibverbs because support is not compiled in");
+        }
+        else
+#endif
+        if (!config.endpoint.address().is_multicast())
+        {
+            logger(spead2::log_level::warning, "Not using ibverbs because endpoint is not multicast");
+        }
+        else if (config.interface_address.is_unspecified())
+        {
+            logger(spead2::log_level::warning, "Not using ibverbs because interface address it not specified");
+        }
+        else
+            use_ibv = true;
+    }
+
+#if SPEAD2_USE_IBV
+    if (use_ibv)
+    {
+        boost::format formatter("Listening on %1% with interface %2% using ibverbs");
+        formatter % config.endpoint % config.interface_address;
+        logger(spead2::log_level::info, formatter.str());
+        stream.emplace_reader<spead2::recv::udp_ibv_reader>(
+            config.endpoint, config.interface_address,
+            spead2::recv::udp_ibv_reader::default_max_size,
+            config.buffer_size,
+            config.comp_vector);
+    }
+    else
+#endif
+    if (config.endpoint.address().is_multicast() && !config.interface_address.is_unspecified())
+    {
+        boost::format formatter("Listening on %1% with interface %2%");
+        formatter % config.endpoint % config.interface_address;
+        logger(spead2::log_level::info, formatter.str());
         stream.emplace_reader<spead2::recv::udp_reader>(
-            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size);
+            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
+            config.interface_address);
     }
     else
     {
-#if SPEAD2_USE_IBV
-        if (config.ibv)
-        {
-            std::cerr << "Using ibverbs\n";
-            stream.emplace_reader<spead2::recv::udp_ibv_reader>(
-                config.endpoint, config.interface_address,
-                spead2::recv::udp_ibv_reader::default_max_size,
-                config.buffer_size,
-                config.comp_vector);
-        }
-#endif
-        else
-            stream.emplace_reader<spead2::recv::udp_reader>(
-                config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
-                config.interface_address);
+        boost::format formatter("Listening on %1%");
+        formatter % config.endpoint;
+        logger(spead2::log_level::info, formatter.str());
+        stream.emplace_reader<spead2::recv::udp_reader>(
+            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size);
     }
 
     // Wait for metadata
@@ -517,11 +547,11 @@ void session::run_impl()
         }
         catch (spead2::ringbuffer_stopped &e)
         {
-            std::cerr << "Stream stopped before we received metadata\n";
+            logger(spead2::log_level::warning, "stream stopped before we received metadata");
             return;
         }
     }
-    std::cout << "Metadata received\n";
+    logger(spead2::log_level::info, "metadata received");
     const std::size_t payload_size = channels * spectra_per_dump * 2;
     const std::uint64_t dump_step = 2 * config.total_channels * spectra_per_dump;
 
@@ -544,8 +574,9 @@ void session::run_impl()
     struct statfs stat;
     if (fstatfs(fd, &stat) < 0)
         throw std::system_error(errno, std::system_category(), "fstatfs failed");
-    std::size_t reserve_blocks = (1024 * 1024 * 1024 + 1024 * payload_size) / stat.f_bsize;
+    std::size_t reserve_blocks = (1024 * 1024 * 1024 + 1000 * payload_size) / stat.f_bsize;
 
+    boost::format progress_formatter("dropped %1% of %2%");
     while (true)
     {
         try
@@ -568,31 +599,32 @@ void session::run_impl()
                     first_timestamp = timestamp;
                 if (timestamp < first_timestamp)
                 {
-                    std::cerr << "timestamp pre-dates start, discarding\n";
+                    logger(spead2::log_level::warning, "timestamp pre-dates start, discarding");
                     continue;
                 }
                 if ((timestamp - first_timestamp) % dump_step != 0)
                 {
-                    std::cerr << "timestamp is not properly aligned, discarding\n";
+                    logger(spead2::log_level::warning, "timestamp is not properly aligned, discarding");
                     continue;
                 }
                 if (data_item->length != payload_size)
                 {
-                    std::cerr << "size mismatch: " << data_item->length
-                        << " != " << payload_size << '\n';
+                    logger(spead2::log_level::warning, "bf_raw item has wrong length, discarding");
                     continue;
                 }
                 n_dumps++;
                 std::uint64_t dump_idx = (timestamp - first_timestamp) / dump_step;
+                std::uint64_t n_total_dumps = dump_idx + 1;
                 w.add(data_item->ptr, data_item->length, timestamp, dump_idx, std::move(fh));
-                if (n_dumps % 1024 == 0)
+                if (n_total_dumps % 1000 == 0)
                 {
-                    std::cout << "Received " << n_dumps << '/' << dump_idx + 1 << " (" << dump_idx + 1 - n_dumps << " dropped)" << std::endl;
+                    progress_formatter % (n_total_dumps - n_dumps) % n_total_dumps;
+                    logger(spead2::log_level::info, progress_formatter.str());
                     if (fstatfs(fd, &stat) < 0)
                         throw std::system_error(errno, std::system_category(), "fstatfs failed");
                     if (stat.f_bavail < reserve_blocks)
                     {
-                        std::cerr << "Stopping capture due to lack of free space\n";
+                        logger(spead2::log_level::info, "stopping capture due to lack of free space");
                         break;
                     }
                 }
@@ -646,4 +678,10 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         .add_property("n_dumps", &session::get_n_dumps)
         .add_property("first_timestamp", &session::get_first_timestamp)
     ;
+
+    object logging_module = import("logging");
+    object spead2_logger = logging_module.attr("getLogger")("spead2");
+    object my_logger = logging_module.attr("getLogger")("katsdpingest.bf_ingest_session");
+    spead2::set_log_function(spead2::log_function_python(spead2_logger));
+    logger = spead2::log_function_python(my_logger);
 }
