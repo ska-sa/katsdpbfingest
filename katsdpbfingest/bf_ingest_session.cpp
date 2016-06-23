@@ -26,6 +26,7 @@
 #include "recv_udp.h"
 #include "common_memory_pool.h"
 #include "common_thread_pool.h"
+#include "py_common.h"
 #include <sys/mman.h>
 #include <system_error>
 #include <cstdlib>
@@ -36,38 +37,6 @@
 namespace py = boost::python;
 
 constexpr int ALIGNMENT = 4096;
-
-/// Duplicate of the version in spead2.
-class release_gil
-{
-private:
-    PyThreadState *save = nullptr;
-
-public:
-    release_gil()
-    {
-        release();
-    }
-
-    ~release_gil()
-    {
-        if (save != nullptr)
-            PyEval_RestoreThread(save);
-    }
-
-    void release()
-    {
-        assert(save == nullptr);
-        save = PyEval_SaveThread();
-    }
-
-    void acquire()
-    {
-        assert(save != nullptr);
-        PyEval_RestoreThread(save);
-        save = nullptr;
-    }
-};
 
 // Suppresses all spead2 logging
 struct logger
@@ -410,14 +379,14 @@ session::session(const session_config &config) :
 
 void session::join()
 {
-    release_gil gil;
+    spead2::release_gil gil;
     if (run_thread.joinable())
         run_thread.join();
 }
 
 void session::stop_stream()
 {
-    release_gil gil;
+    spead2::release_gil gil;
     stream.stop();
 }
 
