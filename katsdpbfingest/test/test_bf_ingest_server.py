@@ -23,7 +23,7 @@ class TestCaptureSession(object):
         self.tmpdir = tempfile.mkdtemp()
         self.args = argparse.Namespace(
             cbf_channels=4096,
-            cbf_spead=[endpoint.Endpoint('239.1.2.3', 8888)],
+            cbf_spead=endpoint.Endpoint('239.1.2.3', 8888),
             file_base=self.tmpdir,
             direct_io=False,
             ibv=False,

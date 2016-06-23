@@ -4,7 +4,6 @@
  *   - put full backtrace into exception object
  *   - debug segfault in exit handlers
  * - grow the file in batches, shrink again at end
- * - change --cbf-spead command-line option to be a single endpoint (or accept multiple)
  * - make Python code more robust to the file being corrupt
  */
 

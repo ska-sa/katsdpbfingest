@@ -60,7 +60,7 @@ class _CaptureSession(object):
         self._args = args
         self.filename = os.path.join(args.file_base, '{}.h5'.format(int(time.time())))
 
-        endpoint = args.cbf_spead[0]  # TODO: make it a singleton
+        endpoint = args.cbf_spead
         address = socket.gethostbyname(endpoint.host)
         config = SessionConfig(self.filename, address, endpoint.port)
         if args.interface is not None:
