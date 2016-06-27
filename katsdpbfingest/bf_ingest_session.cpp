@@ -465,6 +465,11 @@ void session::run_impl()
     if (config.disk_affinity >= 0)
         spead2::thread_pool::set_affinity(config.disk_affinity);
     std::shared_ptr<spead2::memory_allocator> allocator = std::make_shared<spead2::mmap_allocator>();
+    /* We need to set this before adding the reader, so that any data heaps
+     * that are successfully captured prior to the memory pool being set are
+     * correctly aligned for O_DIRECT.
+     */
+    stream.set_memory_allocator(allocator);
     stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
     bool use_ibv = false;
     if (config.ibv)
@@ -567,7 +572,7 @@ void session::run_impl()
     int mp_slots = config.live_heaps + config.ring_heaps + 3;
     std::shared_ptr<spead2::memory_pool> pool = std::make_shared<spead2::memory_pool>(
         0, payload_size, mp_slots, mp_slots, allocator);
-    stream.set_memory_pool(pool);
+    stream.set_memory_allocator(pool);
 
     std::int64_t first_timestamp = -1;
     hdf5_writer w(config.filename, config.direct, channels, spectra_per_dump, 2 * config.total_channels);
