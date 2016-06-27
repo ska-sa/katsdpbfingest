@@ -320,7 +320,7 @@ struct session_config
 
     std::size_t buffer_size = 32 * 1024 * 1024;
     int live_heaps = 2;
-    int ring_heaps = 128;
+    int ring_heaps = 32;
     bool ibv = false;
     int comp_vector = 0;
     int network_affinity = -1;
