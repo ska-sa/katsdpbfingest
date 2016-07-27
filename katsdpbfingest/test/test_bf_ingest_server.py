@@ -16,14 +16,22 @@ from trollius import From
 import spead2
 import spead2.recv.trollius
 import spead2.send
+import socket
 
 
 class TestCaptureSession(object):
     def setup(self):
         self.tmpdir = tempfile.mkdtemp()
+        # To avoid collisions when running tests in parallel on a single host,
+        # create a socket for the duration of the test and use its port as the
+        # port for the test. Sockets in the same network namespace should have
+        # unique ports.
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind(('127.0.0.1', 0))
+        self.port = self._sock.getsockname()[1]
         self.args = argparse.Namespace(
             cbf_channels=4096,
-            cbf_spead=endpoint.Endpoint('239.1.2.3', 8888),
+            cbf_spead=endpoint.Endpoint('239.1.2.3', self.port),
             file_base=self.tmpdir,
             direct_io=False,
             ibv=False,
@@ -32,6 +40,7 @@ class TestCaptureSession(object):
 
     def teardown(self):
         shutil.rmtree(self.tmpdir)
+        self._sock.close()
 
     @trollius.coroutine
     def _test_manual_stop_no_data(self):
@@ -60,7 +69,7 @@ class TestCaptureSession(object):
         # Send it a SPEAD stream
         config = spead2.send.StreamConfig(max_packet_size=4196, rate=1e9 / 8)
         flavour = spead2.Flavour(4, 64, 48, 0)
-        stream = spead2.send.UdpStream(spead2.ThreadPool(), '239.1.2.3', 8888, config)
+        stream = spead2.send.UdpStream(spead2.ThreadPool(), '239.1.2.3', self.port, config)
         ig = spead2.send.ItemGroup(flavour=flavour)
         ig.add_item(name='timestamp', id=0x1600,
                     description='Timestamp', shape=(), format=[('u', 48)])
