@@ -15,9 +15,16 @@ import tornado
 import logging
 import katsdpingest
 import psutil
+import ipaddress
+import netifaces
+import socket
 
 
 _logger = logging.getLogger(__name__)
+
+
+def _get_interface_address(interface):
+    return netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
 
 
 class _CaptureSession(object):
@@ -79,7 +86,19 @@ class _CaptureSession(object):
             _logger.info('Listening on endpoint {}'.format(endpoint))
             # Buffer size is increased from the default, because doing so seems to prevent some
             # occasional dropped heaps
-            self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host, buffer_size=16*1024*1024)
+            interface_address = None
+            if endpoint.host is not None and args.interface is not None:
+                address = socket.gethostbyname(endpoint.host)
+                # ipaddress module requires a unicode string
+                address = ipaddress.ip_address(unicode(address, 'us-ascii'))
+                if address.is_multicast:
+                    interface_address = _get_interface_address(args.interface)
+            if interface_address is not None:
+                self._stream.add_udp_reader(endpoint.host, endpoint.port, buffer_size=16*1024*1024,
+                                            interface_address=interface_address)
+            else:
+                self._stream.add_udp_reader(endpoint.port, bind_hostname=endpoint.host,
+                                            buffer_size=16*1024*1024)
         self._run_future = trollius.async(self._run(), loop=self._loop)
 
     def _create_file_and_memory_pool(self):
