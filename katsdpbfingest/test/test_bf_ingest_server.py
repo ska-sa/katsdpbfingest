@@ -43,7 +43,7 @@ class BaseTestCaptureSession(object):
             cbf_spead=[endpoint.Endpoint('239.1.2.3', 7148)],
             file_base='/not_a_directory',
             buffer=self.buffer,
-            affinity=None, interface=None)
+            affinity=None, interface=None, telstate=None)
         self.loop = trollius.get_event_loop()
         self._spead_patcher = mock.patch.object(
             spead2.recv.trollius.Stream, 'add_udp_reader', add_buffer_reader)
@@ -123,7 +123,7 @@ class BaseTestCaptureSession(object):
             expected[:, time, 1] = time % 255 - 128
         np.testing.assert_equal(expected, bf_raw)
 
-        timestamp = h5file['/Data/timestamp']
+        timestamp = h5file['/Data/timestamps']
         expected = 1234567890 + 2 * self.args.cbf_channels * np.arange(n_time * n_heaps)
         np.testing.assert_equal(expected, timestamp)
         h5file.really_close()

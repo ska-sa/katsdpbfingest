@@ -4,6 +4,7 @@ import spead2.recv
 import spead2.recv.trollius
 import katcp
 from katcp.kattypes import request, return_reply
+from katsdpfilewriter import telescope_model, ar1_model, file_writer
 import h5py
 import numpy as np
 import time
@@ -112,7 +113,7 @@ class _CaptureSession(object):
         n_chans, n_time = self._ig['bf_raw'].shape[0:2]
         dtype = self._ig['bf_raw'].dtype
         self._file = h5py.File(filename, mode='w')
-        self._file.attrs['version'] = 1
+        self._file.attrs['version'] = 2
         data_group = self._file.create_group('Data')
         shape = (n_chans, 0, 2)
         maxshape = (n_chans, None, 2)
@@ -197,6 +198,14 @@ class _CaptureSession(object):
         else:
             return self._write_heap(bf_raw)
 
+    def _write_metadata(self):
+        telstate = self._args.telstate
+        antenna_mask = telstate.get('config', {}).get('antenna_mask', '').split(',')
+        model = ar1_model.create_model(antenna_mask)
+        model_data = telescope_model.TelstateModelData(model, telstate, self._timestamps[0])
+        file_writer.set_telescope_model(self._file, model_data)
+        file_writer.set_telescope_state(self._file, telstate)
+
     def _finalise(self):
         self._stream.stop()
         if self._file:
@@ -207,15 +216,20 @@ class _CaptureSession(object):
             # Write the timestamps to file
             n_time = self._ig['bf_raw'].shape[1]
             ds = self._file['Data'].create_dataset(
-                'timestamp',
+                'timestamps',
                 shape=(n_time * len(self._timestamps),),
                 dtype=np.uint64)
+            ds.attrs['timestamp_reference'] = 'start'
+            ds.attrs['timestamp_type'] = 'adc'
             idx = 0
             for timestamp in self._timestamps:
                 ds[idx : idx + n_time] = np.arange(
                     timestamp, timestamp + n_time * self._timestep, self._timestep,
                     dtype=np.uint64)
                 idx += n_time
+            # Write the metadata to file
+            if self._args.telstate is not None and self._timestamps:
+                self._write_metadata()
             self._file.close()
             self._file = None
 

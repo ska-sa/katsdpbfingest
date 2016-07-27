@@ -17,6 +17,8 @@ from katsdpingest.bf_ingest_server import KatcpCaptureServer
 @trollius.coroutine
 def on_shutdown(server):
     logging.info('Shutting down')
+    trollius.get_event_loop().remove_signal_handler(signal.SIGINT)
+    trollius.get_event_loop().remove_signal_handler(signal.SIGTERM)
     yield From(to_asyncio_future(server.stop()))
     trollius.get_event_loop().stop()
 
