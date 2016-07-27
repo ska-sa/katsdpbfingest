@@ -52,7 +52,7 @@ class _CaptureSession(object):
     _bf_raw : :class:`list`
         `bf_raw` numpy arrays received when in buffering mode
     _timestamps : :class:`list`
-        Timestamp for the start of each heap
+        Timestamp for the start of each *received* heap
     _manual_stop : :class:`bool`
         Whether :meth:`stop` has been called
     _ig : :class:`spead2.ItemGroup`
@@ -61,6 +61,8 @@ class _CaptureSession(object):
         SPEAD stream for incoming data
     _run_future : :class:`trollius.Task`
         Task for the coroutine that does the work
+    _first_timestamp : int
+        Timestamp (as ADC counter) for first data heap
     _timestep : int
         Time interval (in ADC clocks) between spectra
     """
@@ -76,6 +78,7 @@ class _CaptureSession(object):
             self._timestep = 2 * args.cbf_channels
         else:
             self._timestep = None
+        self._first_timestamp = None
         self._ig = spead2.ItemGroup()
         if args.affinity:
             spead2.ThreadPool.set_affinity(args.affinity[0])
@@ -133,11 +136,16 @@ class _CaptureSession(object):
             memory_pool = spead2.MemoryPool(chunk_size, chunk_size + 4096, 24, 16)
         self._stream.set_memory_pool(memory_pool)
 
-    def _write_heap(self, bf_raw):
+    def _write_heap(self, timestamp, bf_raw):
         n_time = bf_raw.shape[1]
-        idx = self._bf_raw_dataset.shape[1]   # Number of spectra already received
-        self._bf_raw_dataset.resize(idx + n_time, axis=1)
+        idx = (timestamp - self._first_timestamp) // self._timestep
+        if idx < 0:
+            _logger.warning('Discarding heap that pre-dates the initial timestamp')
+            return True
+        if idx + n_time > self._bf_raw_dataset.shape[1]:
+            self._bf_raw_dataset.resize(idx + n_time, axis=1)
         self._bf_raw_dataset[:, idx : idx + n_time, :] = bf_raw
+        self._timestamps.append(timestamp)
         # Check free space periodically, but every heap is excessive
         n_heaps = idx // n_time + 1
         if n_heaps % 100 == 0:
@@ -175,9 +183,10 @@ class _CaptureSession(object):
             _logger.info('Received non-data heap %d', heap.cnt)
             return True
         timestamp = self._ig['timestamp'].value
-        self._timestamps.append(timestamp)
         bf_raw = self._ig['bf_raw'].value
         _logger.debug('Received heap with timestamp %d', timestamp)
+        if self._first_timestamp is None:
+            self._first_timestamp = timestamp
 
         n_chans = bf_raw.shape[0]
         if n_chans != self._bf_raw_dataset.shape[0]:
@@ -185,6 +194,7 @@ class _CaptureSession(object):
             return True
         if self._args.buffer:
             self._bf_raw.append(bf_raw)
+            self._timestamps.append(timestamp)
             n_heaps = len(self._bf_raw)
             if n_heaps % 100 == 0:
                 _logger.info('Received %d heaps', n_heaps)
@@ -196,7 +206,7 @@ class _CaptureSession(object):
                     return False
             return True
         else:
-            return self._write_heap(bf_raw)
+            return self._write_heap(timestamp, bf_raw)
 
     def _write_metadata(self):
         telstate = self._args.telstate
@@ -210,13 +220,19 @@ class _CaptureSession(object):
         self._stream.stop()
         if self._file:
             # In buffering mode, write the data to file
-            for bf_raw in self._bf_raw:
-                if not self._write_heap(bf_raw):
-                    break
-            # Write the timestamps to file
+            # Take a copy of the original timestamps, because _write_heap will
+            # record the timestamps that actually get written to file.
+            if self._args.buffer:
+                orig_timestamps = self._timestamps
+                self._timestamps = []
+                for timestamp, bf_raw in zip(orig_timestamps, self._bf_raw):
+                    if not self._write_heap(timestamp, bf_raw):
+                        break
+            # Write the timestamps of captured data to file
             n_time = self._ig['bf_raw'].shape[1]
+            self._timestamps.sort()
             ds = self._file['Data'].create_dataset(
-                'timestamps',
+                'captured_timestamps',
                 shape=(n_time * len(self._timestamps),),
                 dtype=np.uint64)
             ds.attrs['timestamp_reference'] = 'start'
@@ -227,6 +243,16 @@ class _CaptureSession(object):
                     timestamp, timestamp + n_time * self._timestep, self._timestep,
                     dtype=np.uint64)
                 idx += n_time
+            # Write full set of timestamps (for captured and padded data)
+            n_spectra = self._bf_raw_dataset.shape[1]
+            ds = self._file['Data'].create_dataset(
+                'timestamps', shape=(n_spectra,), dtype=np.uint64)
+            ds.attrs['timestamp_reference'] = 'start'
+            ds.attrs['timestamp_type'] = 'adc'
+            ds[:] = np.arange(self._first_timestamp,
+                              self._first_timestamp + n_spectra * self._timestep,
+                              self._timestep,
+                              dtype=np.uint64)
             # Write the metadata to file
             if self._args.telstate is not None and self._timestamps:
                 self._write_metadata()
