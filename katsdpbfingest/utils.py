@@ -25,7 +25,7 @@ class Range(object):
     `slice` (although without support for a non-unit step), where it is easy to
     query the start and stop values, along with other convenience methods.
 
-    Ranges can be empty, in which case they still have a `start` and `value`
+    Ranges can be empty, in which case they still have a `start` and `stop`
     value that are equal, but the value itself is irrelevant.
     """
     def __init__(self, start, stop):
