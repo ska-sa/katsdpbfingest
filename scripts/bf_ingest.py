@@ -9,6 +9,7 @@ from trollius import From
 import argparse
 import os
 import sys
+import time
 import katsdptelstate.endpoint
 import spead2
 from katsdpingest.bf_ingest_server import KatcpCaptureServer
@@ -21,6 +22,16 @@ def on_shutdown(server):
     trollius.get_event_loop().remove_signal_handler(signal.SIGTERM)
     yield From(to_asyncio_future(server.stop()))
     trollius.get_event_loop().stop()
+
+
+def configure_logging(level):
+    formatter = logging.Formatter("%(asctime)s.%(msecs)03dZ - %(filename)s:%(lineno)s - %(levelname)s - %(message)s",
+                                  datefmt="%Y-%m-%d %H:%M:%S")
+    formatter.converter = time.gmtime
+    sh = logging.StreamHandler()
+    sh.setFormatter(formatter)
+    logging.root.addHandler(sh)
+    logging.root.setLevel(level)
 
 
 def main():
@@ -38,7 +49,7 @@ def main():
     args = parser.parse_args()
     if args.affinity and len(args.affinity) < 2:
         parser.error('At least 2 CPUs must be specified for --affinity')
-    logging.basicConfig(level=args.logging, format='%(asctime)s %(levelname)s:%(name)s: %(message)s')
+    configure_logging(args.logging)
     if not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)
         sys.exit(1)
