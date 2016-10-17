@@ -66,10 +66,6 @@ class _CaptureSession(object):
         if args.interface is not None:
             config.interface_address = _get_interface_address(args.interface)
         config.ibv = args.ibv
-        if args.cbf_channels:
-            config.total_channels = args.cbf_channels
-        else:
-            _logger.info('Assuming %d PFB channels; if not, pass --cbf-channels', config.total_channels)
         if args.affinity:
             config.disk_affinity = args.affinity[0]
             config.network_affinity = args.affinity[1]
@@ -129,7 +125,6 @@ class CaptureServer(object):
         Command-line arguments. The following arguments are required. Refer to
         the script for documentation of these options.
 
-        - cbf_channels
         - cbf_spead
         - file_base
         - buffer
