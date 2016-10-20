@@ -30,7 +30,7 @@ class TestCaptureSession(object):
         self._sock.bind(('127.0.0.1', 0))
         self.port = self._sock.getsockname()[1]
         self.args = argparse.Namespace(
-            cbf_spead=endpoint.Endpoint('239.1.2.3', self.port),
+            cbf_spead=[endpoint.Endpoint('239.1.2.3', self.port)],
             file_base=self.tmpdir,
             direct_io=False,
             ibv=False,

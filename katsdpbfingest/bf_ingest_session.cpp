@@ -13,17 +13,18 @@
 #include <sstream>
 #include <utility>
 #include <future>
+#include <cstdint>
 #include <unistd.h>
 #include <boost/lexical_cast.hpp>
 #include <boost/regex.hpp>
-#include "recv_stream.h"
-#include "recv_heap.h"
-#include "recv_ring_stream.h"
-#include "recv_udp_ibv.h"
-#include "recv_udp.h"
-#include "common_memory_pool.h"
-#include "common_thread_pool.h"
-#include "py_common.h"
+#include <spead2/recv_stream.h>
+#include <spead2/recv_heap.h>
+#include <spead2/recv_ring_stream.h>
+#include <spead2/recv_udp_ibv.h>
+#include <spead2/recv_udp.h>
+#include <spead2/common_memory_pool.h>
+#include <spead2/common_thread_pool.h>
+#include <spead2/py_common.h>
 #include <sys/mman.h>
 #include <sys/vfs.h>
 #include <system_error>
@@ -36,6 +37,25 @@ namespace py = boost::python;
 
 static constexpr int ALIGNMENT = 4096;
 static spead2::log_function_python logger;
+
+static void apply_format(boost::format &formatter)
+{
+}
+
+template<typename T0, typename... Ts>
+static void apply_format(boost::format &formatter, T0 &&arg0, Ts&&... args)
+{
+    formatter % std::forward<T0>(arg0);
+    apply_format(formatter, std::forward<Ts>(args)...);
+}
+
+template<typename... Ts>
+static void log_format(spead2::log_level level, const std::string &format, Ts&&... args)
+{
+    boost::format formatter(format);
+    apply_format(formatter, args...);
+    logger(level, formatter.str());
+}
 
 template<typename T>
 struct free_delete
@@ -314,7 +334,7 @@ int hdf5_writer::get_fd() const
 struct session_config
 {
     std::string filename;
-    boost::asio::ip::udp::endpoint endpoint;
+    std::vector<boost::asio::ip::udp::endpoint> endpoints;
     boost::asio::ip::address interface_address;
 
     std::size_t buffer_size = 32 * 1024 * 1024;
@@ -327,15 +347,20 @@ struct session_config
     int disk_affinity = -1;
     bool direct = false;
 
-    session_config(const std::string &filename, const std::string &bind_host, int port);
+    explicit session_config(const std::string &filename);
+    void add_endpoint(const std::string &bind_host, std::uint16_t port);
     std::string get_interface_address() const;
     void set_interface_address(const std::string &address);
 };
 
-session_config::session_config(const std::string &filename, const std::string &bind_host, int port)
-    : filename(filename),
-    endpoint(boost::asio::ip::address_v4::from_string(bind_host), port)
+session_config::session_config(const std::string &filename)
+    : filename(filename)
 {
+}
+
+void session_config::add_endpoint(const std::string &bind_host, std::uint16_t port)
+{
+    endpoints.emplace_back(boost::asio::ip::address_v4::from_string(bind_host), port);
 }
 
 std::string session_config::get_interface_address() const
@@ -470,58 +495,70 @@ void session::run_impl()
      */
     stream.set_memory_allocator(allocator);
     stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
-    bool use_ibv = false;
+    bool use_ibv = true;
     if (config.ibv)
     {
 #if !SPEAD2_USE_IBV
-        if (true)
-        {
-            logger(spead2::log_level::warning, "Not using ibverbs because support is not compiled in");
-        }
-        else
+        logger(spead2::log_level::warning, "Not using ibverbs because support is not compiled in");
+        use_ibv = false;
 #endif
-        if (!config.endpoint.address().is_multicast())
+        if (use_ibv)
         {
-            logger(spead2::log_level::warning, "Not using ibverbs because endpoint is not multicast");
+            for (const auto &endpoint : config.endpoints)
+                if (!endpoint.address().is_multicast())
+                {
+                    log_format(spead2::log_level::warning, "Not using ibverbs because endpoint %1% is not multicast",
+                           endpoint);
+                    use_ibv = false;
+                    break;
+                }
         }
-        else if (config.interface_address.is_unspecified())
+        if (use_ibv && config.interface_address.is_unspecified())
         {
-            logger(spead2::log_level::warning, "Not using ibverbs because interface address it not specified");
+            logger(spead2::log_level::warning, "Not using ibverbs because interface address is not specified");
+            use_ibv = false;
         }
-        else
-            use_ibv = true;
     }
 
+    std::ostringstream endpoints_str;
+    bool first = true;
+    for (const auto &endpoint : config.endpoints)
+    {
+        if (!first)
+            endpoints_str << ',';
+        first = false;
+        endpoints_str << endpoint;
+    }
 #if SPEAD2_USE_IBV
     if (use_ibv)
     {
-        boost::format formatter("Listening on %1% with interface %2% using ibverbs");
-        formatter % config.endpoint % config.interface_address;
-        logger(spead2::log_level::info, formatter.str());
+        log_format(spead2::log_level::info, "Listening on %1% with interface %2% using ibverbs",
+                   endpoints_str.str(), config.interface_address);
         stream.emplace_reader<spead2::recv::udp_ibv_reader>(
-            config.endpoint, config.interface_address,
+            config.endpoints, config.interface_address,
             spead2::recv::udp_ibv_reader::default_max_size,
             config.buffer_size,
             config.comp_vector);
     }
     else
 #endif
-    if (config.endpoint.address().is_multicast() && !config.interface_address.is_unspecified())
     {
-        boost::format formatter("Listening on %1% with interface %2%");
-        formatter % config.endpoint % config.interface_address;
-        logger(spead2::log_level::info, formatter.str());
-        stream.emplace_reader<spead2::recv::udp_reader>(
-            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
-            config.interface_address);
-    }
-    else
-    {
-        boost::format formatter("Listening on %1%");
-        formatter % config.endpoint;
-        logger(spead2::log_level::info, formatter.str());
-        stream.emplace_reader<spead2::recv::udp_reader>(
-            config.endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size);
+        if (!config.interface_address.is_unspecified())
+        {
+            log_format(spead2::log_level::info, "Listening on %1% with interface %2%",
+                       endpoints_str.str(), config.interface_address);
+            for (const auto &endpoint : config.endpoints)
+                stream.emplace_reader<spead2::recv::udp_reader>(
+                    endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
+                    config.interface_address);
+        }
+        else
+        {
+            log_format(spead2::log_level::info, "Listening on %1%", endpoints_str.str());
+            for (const auto &endpoint : config.endpoints)
+                stream.emplace_reader<spead2::recv::udp_reader>(
+                    endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size);
+        }
     }
 
     // Wait for metadata
@@ -612,17 +649,20 @@ void session::run_impl()
                     first_timestamp = timestamp;
                 if (timestamp < first_timestamp)
                 {
-                    logger(spead2::log_level::warning, "timestamp pre-dates start, discarding");
+                    log_format(spead2::log_level::warning, "timestamp %1% pre-dates start %2%, discarding",
+                               timestamp, first_timestamp);
                     continue;
                 }
                 if ((timestamp - first_timestamp) % dump_step != 0)
                 {
-                    logger(spead2::log_level::warning, "timestamp is not properly aligned, discarding");
+                    log_format(spead2::log_level::warning, "timestamp %1% is not properly aligned to %2%, discarding",
+                               timestamp, dump_step);
                     continue;
                 }
                 if (data_item->length != payload_size)
                 {
-                    logger(spead2::log_level::warning, "bf_raw item has wrong length, discarding");
+                    log_format(spead2::log_level::warning, "bf_raw item has wrong length (%1% != %2%), discarding",
+                               data_item->length, payload_size);
                     continue;
                 }
                 n_dumps++;
@@ -677,8 +717,7 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
     using namespace boost::python;
 
     class_<session_config>("SessionConfig",
-        init<const std::string &, const std::string &, int>(
-            (arg("filename"), arg("multicast_group"), arg("port"))))
+        init<const std::string &>(arg("filename")))
         .def_readwrite("filename", &session_config::filename)
         .add_property("interface_address", &session_config::get_interface_address, &session_config::set_interface_address)
         .def_readwrite("buffer_size", &session_config::buffer_size)
@@ -689,6 +728,8 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         .def_readwrite("network_affinity", &session_config::network_affinity)
         .def_readwrite("disk_affinity", &session_config::disk_affinity)
         .def_readwrite("direct", &session_config::direct)
+        .def("add_endpoint", &session_config::add_endpoint,
+             (arg("bind_host"), arg("port")));
     ;
     class_<session, boost::noncopyable>("Session",
         init<const session_config &>(arg("config")))

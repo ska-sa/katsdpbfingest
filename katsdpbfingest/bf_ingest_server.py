@@ -60,9 +60,9 @@ class _CaptureSession(object):
         self._args = args
         self.filename = os.path.join(args.file_base, '{}.h5'.format(int(time.time())))
 
-        endpoint = args.cbf_spead
-        address = socket.gethostbyname(endpoint.host)
-        config = SessionConfig(self.filename, address, endpoint.port)
+        config = SessionConfig(self.filename)
+        for endpoint in args.cbf_spead:
+            config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
         if args.interface is not None:
             config.interface_address = _get_interface_address(args.interface)
         config.ibv = args.ibv
