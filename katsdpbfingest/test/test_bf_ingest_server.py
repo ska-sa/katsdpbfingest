@@ -35,7 +35,6 @@ class TestCaptureSession(object):
             direct_io=False,
             ibv=False,
             affinity=None, interface=None, telstate=None)
-        self.ticks_between_spectra = 8192
         self.loop = trollius.get_event_loop()
 
     def teardown(self):
@@ -59,8 +58,10 @@ class TestCaptureSession(object):
     @trollius.coroutine
     def _test_stream(self, end):
         n_channels = 768
-        n_time = 256
+        spectra_per_heap = 256
         n_heaps = 5
+        n_spectra = spectra_per_heap * n_heaps
+        ticks_between_spectra = 8192
 
         # Start up the server
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
@@ -74,22 +75,25 @@ class TestCaptureSession(object):
         ig.add_item(name='timestamp', id=0x1600,
                     description='Timestamp', shape=(), format=[('u', 48)])
         ig.add_item(name='bf_raw',  id=0x5000,
-                    description='Beamformer data', shape=(n_channels, n_time, 2), dtype=np.int8)
+                    description='Beamformer data', shape=(n_channels, spectra_per_heap, 2), dtype=np.int8)
         ig.add_item(name='ticks_between_spectra', id=0x104A,
                     description='Number of sample ticks between spectra.',
-                    shape=(), format=[('u', 48)], value=self.ticks_between_spectra)
+                    shape=(), format=[('u', 48)], value=ticks_between_spectra)
+        ig.add_item(name='n_chans', id=0x1009,
+                    description='The total number of frequency channels present in any integration.',
+                    shape=(), format=[('u', 48)], value=n_channels)
         stream.send_heap(ig.get_heap())
         stream.send_heap(ig.get_start())
         ts = 1234567890
         for i in range(5):
             ig['timestamp'].value = ts
-            ig['bf_raw'].value = np.zeros((n_channels, n_time, 2), np.int8)
+            ig['bf_raw'].value = np.zeros((n_channels, spectra_per_heap, 2), np.int8)
             for channel in range(n_channels):
                 ig['bf_raw'].value[channel, :, 0] = channel % 255 - 128
-            for t in range(n_time):
-                ig['bf_raw'].value[:, t, 1] = (i * n_time + t) % 255 - 128
+            for t in range(spectra_per_heap):
+                ig['bf_raw'].value[:, t, 1] = (i * spectra_per_heap + t) % 255 - 128
             stream.send_heap(ig.get_heap())
-            ts += n_time * self.ticks_between_spectra
+            ts += spectra_per_heap * ticks_between_spectra
         if end:
             stream.send_heap(ig.get_end())
         stream = None
@@ -103,15 +107,15 @@ class TestCaptureSession(object):
         h5file = h5py.File(filename, 'r')
         with contextlib.closing(h5file):
             bf_raw = h5file['/Data/bf_raw']
-            expected = np.empty_like(bf_raw)
+            expected = np.zeros((n_channels, n_spectra, 2), np.int8)
             for channel in range(n_channels):
                 expected[channel, :, 0] = channel % 255 - 128
-            for t in range(n_time * n_heaps):
+            for t in range(n_spectra):
                 expected[:, t, 1] = t % 255 - 128
             np.testing.assert_equal(expected, bf_raw)
 
             timestamp = h5file['/Data/timestamps']
-            expected = 1234567890 + self.ticks_between_spectra * np.arange(n_time * n_heaps)
+            expected = 1234567890 + ticks_between_spectra * np.arange(spectra_per_heap * n_heaps)
             np.testing.assert_equal(expected, timestamp)
 
     def test_stream_end(self):
