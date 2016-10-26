@@ -148,7 +148,6 @@ class TestCaptureSession(object):
 
             flags = h5file['/Data/flags']
             expected = np.where(drop, 8, 0).astype(np.uint8)
-            print(np.sum(flags))
             np.testing.assert_equal(expected, flags)
 
     def test_stream_end(self):
