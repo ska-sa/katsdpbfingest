@@ -59,11 +59,16 @@ class TestCaptureSession(object):
     def _test_stream(self, end):
         n_channels = 768
         spectra_per_heap = 256
-        n_heaps = 25
+        n_heaps = 25              # number of heaps in time
         n_spectra = spectra_per_heap * n_heaps
         n_bengs = 8
         ticks_between_spectra = 8192
         channels_per_heap = n_channels // n_bengs
+        # Pick some heaps to drop, including an entire slice
+        drop = np.zeros((n_bengs, n_heaps), np.bool_)
+        drop[:, 4] = True
+        drop[2, 9] = True
+        drop[7, 24] = True
 
         # Start up the server
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
@@ -99,7 +104,8 @@ class TestCaptureSession(object):
                 ig['timestamp'].value = ts
                 ig['frequency'].value = j * channels_per_heap
                 ig['bf_raw'].value = data[j * channels_per_heap : (j + 1) * channels_per_heap, ...]
-                stream.send_heap(ig.get_heap())
+                if not drop[j, i]:
+                    stream.send_heap(ig.get_heap())
             ts += spectra_per_heap * ticks_between_spectra
         if end:
             stream.send_heap(ig.get_end())
@@ -119,11 +125,31 @@ class TestCaptureSession(object):
                 expected[channel, :, 0] = channel % 255 - 128
             for t in range(n_spectra):
                 expected[:, t, 1] = t % 255 - 128
+            for i in range(n_bengs):
+                for j in range(n_heaps):
+                    if drop[i, j]:
+                        channel0 = i * channels_per_heap
+                        spectrum0 = j * spectra_per_heap
+                        expected[channel0 : channel0 + channels_per_heap,
+                                 spectrum0 : spectrum0 + spectra_per_heap, :] = 0
             np.testing.assert_equal(expected, bf_raw)
 
-            timestamp = h5file['/Data/timestamps']
+            timestamps = h5file['/Data/timestamps']
             expected = 1234567890 + ticks_between_spectra * np.arange(spectra_per_heap * n_heaps)
-            np.testing.assert_equal(expected, timestamp)
+            np.testing.assert_equal(expected, timestamps)
+
+            captured_timestamps = h5file['/Data/captured_timestamps']
+            slice_drops = np.sum(drop, axis=0)
+            captured_slices = np.nonzero(slice_drops == 0)[0]
+            captured_spectra = captured_slices[:, np.newaxis] * spectra_per_heap + \
+                    np.arange(spectra_per_heap)[np.newaxis, :]
+            expected = 1234567890 + ticks_between_spectra * captured_spectra.flatten()
+            np.testing.assert_equal(expected, captured_timestamps)
+
+            flags = h5file['/Data/flags']
+            expected = np.where(drop, 8, 0).astype(np.uint8)
+            print(np.sum(flags))
+            np.testing.assert_equal(expected, flags)
 
     def test_stream_end(self):
         """Stream ends with an end-of-stream"""

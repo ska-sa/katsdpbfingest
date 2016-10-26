@@ -139,7 +139,9 @@ private:
     void flush_oldest();
 
 public:
-    explicit window(std::size_t window_size);
+    // The args are passed to the constructor for T
+    template<typename... Args>
+    explicit window(std::size_t window_size, Args&&... args);
 
     /// Returns pointer to the slot for @a id, or @c nullptr if the window has moved on
     T *get(std::int64_t id);
@@ -147,9 +149,12 @@ public:
 };
 
 template<typename T, typename Derived>
-window<T, Derived>::window(std::size_t window_size)
-    : slots(window_size)
+template<typename... Args>
+window<T, Derived>::window(std::size_t window_size, Args&&... args)
 {
+    slots.reserve(window_size);
+    for (std::size_t i = 0; i < window_size; i++)
+        slots.emplace_back(std::forward<Args>(args)...);
 }
 
 template<typename T, typename Derived>
@@ -254,7 +259,6 @@ class hdf5_bf_raw_writer
 private:
     const int channels;
     const int spectra_per_heap;
-    hsize_t n_spectra = 0;
     H5::DataSet dataset;
     H5::DSetMemXferPropList dxpl;
 
@@ -283,12 +287,8 @@ hdf5_bf_raw_writer::hdf5_bf_raw_writer(
 void hdf5_bf_raw_writer::add(const slice &s)
 {
     hsize_t end = s.spectrum + spectra_per_heap;
-    if (end > n_spectra)
-    {
-        hsize_t new_size[3] = {hsize_t(channels), end, 2};
-        dataset.extend(new_size);
-        n_spectra = end;
-    }
+    hsize_t new_size[3] = {hsize_t(channels), end, 2};
+    dataset.extend(new_size);
     const hsize_t offset[3] = {0, hsize_t(s.spectrum), 0};
     const hsize_t *offset_ptr = offset;
     dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_OFFSET_NAME, &offset_ptr);
@@ -383,6 +383,103 @@ void hdf5_timestamps_writer::add(std::uint64_t timestamp)
         flush();
 }
 
+static constexpr std::uint8_t data_lost = 1 << 3;
+
+struct flags_chunk
+{
+    std::int64_t spectrum = -1;
+    aligned_ptr<std::uint8_t> data;
+
+    explicit flags_chunk(std::size_t size)
+        : data(make_aligned<std::uint8_t>(size))
+    {
+        std::memset(data.get(), data_lost, size);
+    }
+};
+
+class hdf5_flags_writer : private window<flags_chunk, hdf5_flags_writer>
+{
+private:
+    friend class window<flags_chunk, hdf5_flags_writer>;
+
+    std::size_t spectra_per_heap;
+    std::size_t heaps_per_slice;
+    std::size_t heaps_per_chunk;
+    std::size_t slices_per_chunk;
+    hsize_t n_slices = 0;    ///< Total slices seen (including skipped ones)
+    H5::DataSet dataset;
+    H5::DSetMemXferPropList dxpl;
+
+    static std::size_t compute_chunk_size(int heaps_per_slice);
+    void flush(flags_chunk &chunk);
+public:
+    hdf5_flags_writer(H5::CommonFG &parent, int heaps_per_slice, int spectra_per_heap,
+                      const char *name);
+    ~hdf5_flags_writer();
+    void add(const slice &s);
+};
+
+std::size_t hdf5_flags_writer::compute_chunk_size(int heaps_per_slice)
+{
+    // Make each slice about 4MiB, rounding up if needed
+    std::size_t slices = (4 * 1024 * 1024 + heaps_per_slice - 1) / heaps_per_slice;
+    return slices * heaps_per_slice;
+}
+
+hdf5_flags_writer::hdf5_flags_writer(
+    H5::CommonFG &parent, int heaps_per_slice, int spectra_per_heap,
+    const char *name)
+    : window<flags_chunk, hdf5_flags_writer>(1, compute_chunk_size(heaps_per_slice)),
+    spectra_per_heap(spectra_per_heap),
+    heaps_per_slice(heaps_per_slice),
+    heaps_per_chunk(compute_chunk_size(heaps_per_slice)),
+    slices_per_chunk(heaps_per_chunk / heaps_per_slice),
+    dxpl(make_dxpl_direct(heaps_per_chunk))
+{
+    hsize_t dims[2] = {hsize_t(heaps_per_slice), 0};
+    hsize_t maxdims[2] = {hsize_t(heaps_per_slice), H5S_UNLIMITED};
+    hsize_t chunk[2] = {hsize_t(heaps_per_slice), hsize_t(slices_per_chunk)};
+    H5::DataSpace file_space(2, dims, maxdims);
+    H5::DSetCreatPropList dcpl;
+    dcpl.setChunk(2, chunk);
+    dcpl.setFillValue(H5::PredType::NATIVE_UINT8, &data_lost);
+    dataset = parent.createDataSet(name, H5::PredType::STD_U8BE, file_space, dcpl);
+}
+
+hdf5_flags_writer::~hdf5_flags_writer()
+{
+    if (!std::uncaught_exception())
+        flush_all();
+}
+
+void hdf5_flags_writer::flush(flags_chunk &chunk)
+{
+    if (chunk.spectrum != -1)
+    {
+        hsize_t new_size[2] = {hsize_t(heaps_per_slice), n_slices};
+        dataset.extend(new_size);
+        const hsize_t offset[2] = {0, hsize_t(chunk.spectrum / spectra_per_heap)};
+        const hsize_t *offset_ptr = offset;
+        dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_OFFSET_NAME, &offset_ptr);
+        dataset.write(chunk.data.get(), H5::PredType::NATIVE_UINT8, H5S_ALL, H5S_ALL, dxpl);
+    }
+    chunk.spectrum = -1;
+    std::memset(chunk.data.get(), data_lost, heaps_per_chunk);
+}
+
+void hdf5_flags_writer::add(const slice &s)
+{
+    std::int64_t slice_id = s.spectrum / spectra_per_heap;
+    std::int64_t id = slice_id / slices_per_chunk;
+    flags_chunk *chunk = get(id);
+    assert(chunk != nullptr);  // we are given slices in-order, so cannot be behind the window
+    std::size_t offset = slice_id - id * slices_per_chunk;
+    for (std::size_t i = 0; i < s.present.size(); i++)
+        chunk->data[i * slices_per_chunk + offset] = s.present[i] ? 0 : data_lost;
+    chunk->spectrum = id * spectra_per_heap * slices_per_chunk;
+    n_slices = slice_id + 1;
+}
+
 class hdf5_writer
 {
 private:
@@ -391,18 +488,20 @@ private:
     H5::Group group;
     hdf5_bf_raw_writer bf_raw;
     hdf5_timestamps_writer captured_timestamps, all_timestamps;
+    hdf5_flags_writer flags;
 
     static H5::FileAccPropList make_fapl(bool direct);
 
 public:
     hdf5_writer(const std::string &filename, bool direct,
-                int channels, int spectra_per_heap,
+                int channels, int channels_per_heap, int spectra_per_heap,
                 std::int64_t ticks_between_spectra)
         : file(filename, H5F_ACC_TRUNC, H5::FileCreatPropList::DEFAULT, make_fapl(direct)),
         group(file.createGroup("Data")),
         bf_raw(group, channels, spectra_per_heap, "bf_raw"),
         captured_timestamps(group, spectra_per_heap, ticks_between_spectra, "captured_timestamps"),
-        all_timestamps(group, spectra_per_heap, ticks_between_spectra, "timestamps")
+        all_timestamps(group, spectra_per_heap, ticks_between_spectra, "timestamps"),
+        flags(group, channels / channels_per_heap, spectra_per_heap, "flags")
     {
         H5::DataSpace scalar;
         // 1.8.11 doesn't have the right C++ wrapper for this to work, so we
@@ -420,7 +519,7 @@ public:
          */
         if (version_attr.getCounter() > 1)
             version_attr.decRefCount();
-        const std::int32_t version = 2;
+        const std::int32_t version = 3;
         version_attr.write(H5::PredType::NATIVE_INT32, &version);
     }
 
@@ -470,6 +569,7 @@ void hdf5_writer::add(const slice &s)
     if (s.n_present == s.present.size())
         captured_timestamps.add(s.timestamp);
     bf_raw.add(s);
+    flags.add(s);
 }
 
 int hdf5_writer::get_fd() const
@@ -569,7 +669,7 @@ public:
  * Class bf_stream is a thin stream wrapper that calls back into this class to
  * handle the received heaps.
  */
-class receiver : public window<slice, receiver>
+class receiver : private window<slice, receiver>
 {
 private:
     friend class bf_stream;
@@ -1221,7 +1321,7 @@ void session::run_impl()
     spead2::ringbuffer<slice> &free_ring = recv.get_free_ring();
 
     hdf5_writer w(config.filename, config.direct,
-                  channels, spectra_per_heap, ticks_between_spectra);
+                  channels, channels_per_heap, spectra_per_heap, ticks_between_spectra);
     int fd = w.get_fd();
     struct statfs stat;
     if (fstatfs(fd, &stat) < 0)
