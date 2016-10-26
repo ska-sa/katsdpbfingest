@@ -890,7 +890,7 @@ void receiver::emplace_readers()
     {
         log_format(spead2::log_level::info, "Listening on %1% with interface %2% using ibverbs",
                    endpoints_str.str(), config.interface_address);
-        stream->emplace_reader<spead2::recv::udp_ibv_reader>(
+        stream.emplace_reader<spead2::recv::udp_ibv_reader>(
             config.endpoints, config.interface_address,
             spead2::recv::udp_ibv_reader::default_max_size,
             config.buffer_size,
