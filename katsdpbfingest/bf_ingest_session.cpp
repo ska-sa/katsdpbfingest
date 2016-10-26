@@ -684,7 +684,7 @@ private:
     };
 
     const session_config config;
-    bool use_ibv;
+    bool use_ibv = false;
     spead2::thread_pool worker;
     bf_stream stream;
 
@@ -1203,9 +1203,9 @@ receiver::receiver(const session_config &config)
 {
     spead2::release_gil gil;
 
-    use_ibv = true;
     if (config.ibv)
     {
+        use_ibv = true;
 #if !SPEAD2_USE_IBV
         logger(spead2::log_level::warning, "Not using ibverbs because support is not compiled in");
         use_ibv = false;
