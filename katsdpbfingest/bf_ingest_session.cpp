@@ -1201,32 +1201,46 @@ receiver::receiver(const session_config &config)
 {
     spead2::release_gil gil;
 
-    if (config.ibv)
+    try
     {
-        use_ibv = true;
+        if (config.ibv)
+        {
+            use_ibv = true;
 #if !SPEAD2_USE_IBV
-        logger(spead2::log_level::warning, "Not using ibverbs because support is not compiled in");
-        use_ibv = false;
-#endif
-        if (use_ibv)
-        {
-            for (const auto &endpoint : config.endpoints)
-                if (!endpoint.address().is_multicast())
-                {
-                    log_format(spead2::log_level::warning, "Not using ibverbs because endpoint %1% is not multicast",
-                           endpoint);
-                    use_ibv = false;
-                    break;
-                }
-        }
-        if (use_ibv && config.interface_address.is_unspecified())
-        {
-            logger(spead2::log_level::warning, "Not using ibverbs because interface address is not specified");
+            logger(spead2::log_level::warning, "Not using ibverbs because support is not compiled in");
             use_ibv = false;
+#endif
+            if (use_ibv)
+            {
+                for (const auto &endpoint : config.endpoints)
+                    if (!endpoint.address().is_multicast())
+                    {
+                        log_format(spead2::log_level::warning, "Not using ibverbs because endpoint %1% is not multicast",
+                               endpoint);
+                        use_ibv = false;
+                        break;
+                    }
+            }
+            if (use_ibv && config.interface_address.is_unspecified())
+            {
+                logger(spead2::log_level::warning, "Not using ibverbs because interface address is not specified");
+                use_ibv = false;
+            }
         }
-    }
 
-    emplace_readers();
+        emplace_readers();
+    }
+    catch (std::exception)
+    {
+        /* Normally we can rely on the destructor to call stop() (which is
+         * necessary to ensure that the stream isn't going to make more calls
+         * into the receiver while it is being destroyed), but an exception
+         * thrown from the constructor does not cause the destructor to get
+         * called.
+         */
+        stop();
+        throw;
+    }
 }
 
 receiver::~receiver()
@@ -1249,7 +1263,7 @@ private:
 
 public:
     explicit session(const session_config &config);
-    ~session() { recv.stop(); }
+    ~session();
 
     void join();
     void stop_stream();
@@ -1264,6 +1278,14 @@ session::session(const session_config &config) :
     recv(config),
     run_future(std::async(std::launch::async, &session::run, this))
 {
+}
+
+session::~session()
+{
+    spead2::release_gil gil;
+    recv.stop();
+    if (run_future.valid())
+        run_future.wait();   // don't get(), since that could throw
 }
 
 void session::join()
