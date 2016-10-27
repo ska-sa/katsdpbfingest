@@ -1190,9 +1190,6 @@ void receiver::stop()
     if (state == state_t::DATA)
         ring->stop();
     stream.stop();
-    if (state == state_t::METADATA)
-        metadata_ready_promise.set_value(false);
-    state = state_t::STOP;
 }
 
 receiver::receiver(const session_config &config)
