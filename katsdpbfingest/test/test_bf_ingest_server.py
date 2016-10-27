@@ -8,7 +8,7 @@ import shutil
 import time
 import contextlib
 import numpy as np
-from katsdpingest import bf_ingest_server
+from katsdpingest import bf_ingest_server, _bf_ingest_session
 from nose.tools import *
 from katsdptelstate import endpoint
 import trollius
@@ -19,7 +19,28 @@ import spead2.send
 import socket
 
 
-class TestCaptureSession(object):
+class TestSession(object):
+    def setup(self):
+        # To avoid collisions when running tests in parallel on a single host,
+        # create a socket for the duration of the test and use its port as the
+        # port for the test. Sockets in the same network namespace should have
+        # unique ports.
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind(('127.0.0.1', 0))
+        self.port = self._sock.getsockname()[1]
+
+    def teardown(self):
+        self._sock.close()
+
+    def test_no_stop(self):
+        """Deleting a session without stopping it must tidy up"""
+        # Filename is irrelevant, since it will never be opened
+        config = _bf_ingest_session.SessionConfig('/not_a_real_filename')
+        config.add_endpoint('239.1.2.3', self.port)
+        session = _bf_ingest_session.Session(config)
+
+
+class TestCaptureServer(object):
     def setup(self):
         self.tmpdir = tempfile.mkdtemp()
         # To avoid collisions when running tests in parallel on a single host,
