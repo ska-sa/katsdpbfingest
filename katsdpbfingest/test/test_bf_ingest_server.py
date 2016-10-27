@@ -30,12 +30,12 @@ class TestCaptureSession(object):
         self._sock.bind(('127.0.0.1', 0))
         self.port = self._sock.getsockname()[1]
         self.args = argparse.Namespace(
-            cbf_channels=4096,
             cbf_spead=endpoint.Endpoint('239.1.2.3', self.port),
             file_base=self.tmpdir,
             direct_io=False,
             ibv=False,
             affinity=None, interface=None, telstate=None)
+        self.ticks_between_spectra = 8192
         self.loop = trollius.get_event_loop()
 
     def teardown(self):
@@ -75,6 +75,9 @@ class TestCaptureSession(object):
                     description='Timestamp', shape=(), format=[('u', 48)])
         ig.add_item(name='bf_raw',  id=0x5000,
                     description='Beamformer data', shape=(n_channels, n_time, 2), dtype=np.int8)
+        ig.add_item(name='ticks_between_spectra', id=0x104A,
+                    description='Number of sample ticks between spectra.',
+                    shape=(), format=[('u', 48)], value=self.ticks_between_spectra)
         stream.send_heap(ig.get_heap())
         stream.send_heap(ig.get_start())
         ts = 1234567890
@@ -86,7 +89,7 @@ class TestCaptureSession(object):
             for t in range(n_time):
                 ig['bf_raw'].value[:, t, 1] = (i * n_time + t) % 255 - 128
             stream.send_heap(ig.get_heap())
-            ts += n_time * (2 * self.args.cbf_channels)
+            ts += n_time * self.ticks_between_spectra
         if end:
             stream.send_heap(ig.get_end())
         stream = None
@@ -108,7 +111,7 @@ class TestCaptureSession(object):
             np.testing.assert_equal(expected, bf_raw)
 
             timestamp = h5file['/Data/timestamps']
-            expected = 1234567890 + 2 * self.args.cbf_channels * np.arange(n_time * n_heaps)
+            expected = 1234567890 + self.ticks_between_spectra * np.arange(n_time * n_heaps)
             np.testing.assert_equal(expected, timestamp)
 
     def test_stream_end(self):

@@ -316,7 +316,6 @@ struct session_config
     std::string filename;
     boost::asio::ip::udp::endpoint endpoint;
     boost::asio::ip::address interface_address;
-    int total_channels = 4096;
 
     std::size_t buffer_size = 32 * 1024 * 1024;
     int live_heaps = 2;
@@ -528,9 +527,12 @@ void session::run_impl()
     // Wait for metadata
     int channels = -1;
     int spectra_per_dump = -1;
+    int ticks_between_spectra = -1;
     int bf_raw_id = -1;
     int timestamp_id = -1;
-    while (channels == -1 || spectra_per_dump == -1 || bf_raw_id == -1 || timestamp_id == -1)
+    int ticks_between_spectra_id = -1;
+    while (channels == -1 || spectra_per_dump == -1 || ticks_between_spectra == -1
+           || bf_raw_id == -1 || timestamp_id == -1)
     {
         try
         {
@@ -549,7 +551,12 @@ void session::run_impl()
                 }
                 else if (descriptor.name == "timestamp")
                     timestamp_id = descriptor.id;
+                else if (descriptor.name == "ticks_between_spectra")
+                    ticks_between_spectra_id = descriptor.id;
             }
+            for (const auto item : fh.get_items())
+                if (item.id == ticks_between_spectra_id)
+                    ticks_between_spectra = item.immediate_value;
         }
         catch (spead2::ringbuffer_stopped &e)
         {
@@ -559,7 +566,7 @@ void session::run_impl()
     }
     logger(spead2::log_level::info, "metadata received");
     const std::size_t payload_size = channels * spectra_per_dump * 2;
-    const std::uint64_t dump_step = 2 * config.total_channels * spectra_per_dump;
+    const std::uint64_t dump_step = std::uint64_t(ticks_between_spectra) * spectra_per_dump;
 
     /* We size the memory pool so that it should never run out. For this, we
      * need slots for
@@ -575,7 +582,7 @@ void session::run_impl()
     stream.set_memory_allocator(pool);
 
     std::int64_t first_timestamp = -1;
-    hdf5_writer w(config.filename, config.direct, channels, spectra_per_dump, 2 * config.total_channels);
+    hdf5_writer w(config.filename, config.direct, channels, spectra_per_dump, ticks_between_spectra);
     int fd = w.get_fd();
     struct statfs stat;
     if (fstatfs(fd, &stat) < 0)
@@ -674,7 +681,6 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
             (arg("filename"), arg("multicast_group"), arg("port"))))
         .def_readwrite("filename", &session_config::filename)
         .add_property("interface_address", &session_config::get_interface_address, &session_config::set_interface_address)
-        .def_readwrite("total_channels", &session_config::total_channels)
         .def_readwrite("buffer_size", &session_config::buffer_size)
         .def_readwrite("live_heaps", &session_config::live_heaps)
         .def_readwrite("ring_heaps", &session_config::ring_heaps)
