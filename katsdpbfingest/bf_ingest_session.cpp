@@ -972,7 +972,8 @@ void receiver::process_metadata(const spead2::recv::heap &h)
     }
 
     // frequency_id is excluded, since v3 of the ICD does not include it.
-    if (channels > 0 && spectra_per_heap > 0 && ticks_between_spectra > 0
+    if (channels > 0 && channels_per_heap > 0
+        && spectra_per_heap > 0 && ticks_between_spectra > 0
         && bf_raw_id != -1 && timestamp_id != -1)
     {
         prepare_for_data();
