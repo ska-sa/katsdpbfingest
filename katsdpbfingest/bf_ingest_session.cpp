@@ -685,8 +685,6 @@ private:
 
     const session_config config;
     bool use_ibv = false;
-    spead2::thread_pool worker;
-    bf_stream stream;
 
     /// Depth of window
     static constexpr std::size_t window_size = 2;
@@ -708,6 +706,9 @@ private:
 
     std::unique_ptr<spead2::ringbuffer<slice>> ring, free_ring;
     std::promise<bool> metadata_ready_promise;
+
+    spead2::thread_pool worker;
+    bf_stream stream;
 
     /// Create a single fully-allocated slice
     slice make_slice();
@@ -1198,8 +1199,8 @@ receiver::receiver(const session_config &config)
     : window<slice, receiver>(window_size),
     config(config),
     worker(1, affinity_vector(config.network_affinity)),
-    stream(*this, config.live_heaps),
-    metadata_ready(metadata_ready_promise.get_future())
+    metadata_ready(metadata_ready_promise.get_future()),
+    stream(*this, config.live_heaps)
 {
     spead2::release_gil gil;
 
