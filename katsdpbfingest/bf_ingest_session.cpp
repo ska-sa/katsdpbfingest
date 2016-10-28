@@ -63,6 +63,10 @@ namespace py = boost::python;
 static constexpr int ALIGNMENT = 4096;
 static spead2::log_function_python logger;
 
+/**
+ * Recursively push a variadic list of arguments into a @c boost::format. This
+ * is copied from the spead2 codebase.
+ */
 static void apply_format(boost::format &formatter)
 {
 }
@@ -94,6 +98,10 @@ struct free_delete
 template<typename T>
 using aligned_ptr = std::unique_ptr<T[], free_delete<T>>;
 
+/**
+ * Allocate memory that is aligned to a multiple of @c ALIGNMENT. This is used
+ * with O_DIRECT.
+ */
 template<typename T>
 static aligned_ptr<T> make_aligned(std::size_t elements)
 {
@@ -103,6 +111,10 @@ static aligned_ptr<T> make_aligned(std::size_t elements)
     return std::unique_ptr<T[], free_delete<T>>(static_cast<T*>(ptr));
 }
 
+/**
+ * Return a vector that can be passed to a @c spead2::thread_pool constructor
+ * to bind to core @a affinity is non-negative.
+ */
 std::vector<int> affinity_vector(int affinity)
 {
     if (affinity < 0)
@@ -132,19 +144,26 @@ public:
     typedef T value_type;
 
 private:
+    /**
+     * The window itself. Item @c i is stored in index
+     * <code>i % window_size</code>, provided that
+     * <code>start &lt;= i &lt; start + window_size</code>.
+     */
     std::vector<T> slots;
-    std::size_t oldest = 0;      ///< Index into slots of oldest item
+    std::size_t oldest = 0;      ///< Index into @ref slots of oldest item
     std::int64_t start = 0;      ///< ID of oldest item in window
 
     void flush_oldest();
 
 public:
-    // The args are passed to the constructor for T
+    // The args are passed to the constructor for T to construct the slots
     template<typename... Args>
     explicit window(std::size_t window_size, Args&&... args);
 
     /// Returns pointer to the slot for @a id, or @c nullptr if the window has moved on
     T *get(std::int64_t id);
+
+    /// Flush the next @a window_size items (even if they have never been requested)
     void flush_all();
 };
 
@@ -245,6 +264,9 @@ static std::vector<spead2::s_item_pointer_t> get_shape(const spead2::descriptor 
         return descriptor.shape;
 }
 
+/**
+ * Storage for all the heaps that share a timestamp.
+ */
 struct slice
 {
     std::int64_t timestamp = -1;       ///< Timestamp from the heap
@@ -385,6 +407,10 @@ void hdf5_timestamps_writer::add(std::uint64_t timestamp)
 
 static constexpr std::uint8_t data_lost = 1 << 3;
 
+/**
+ * Memory storage for an HDF5 chunk of flags data. This covers the whole band
+ * and also many heaps in time.
+ */
 struct flags_chunk
 {
     std::int64_t spectrum = -1;
@@ -437,8 +463,8 @@ hdf5_flags_writer::hdf5_flags_writer(
     dxpl(make_dxpl_direct(heaps_per_chunk))
 {
     hsize_t dims[2] = {hsize_t(heaps_per_slice), 0};
-    hsize_t maxdims[2] = {hsize_t(heaps_per_slice), H5S_UNLIMITED};
-    hsize_t chunk[2] = {hsize_t(heaps_per_slice), hsize_t(slices_per_chunk)};
+    hsize_t maxdims[2] = {dims[0], H5S_UNLIMITED};
+    hsize_t chunk[2] = {dims[0], hsize_t(slices_per_chunk)};
     H5::DataSpace file_space(2, dims, maxdims);
     H5::DSetCreatPropList dcpl;
     dcpl.setChunk(2, chunk);
@@ -625,6 +651,9 @@ void session_config::set_interface_address(const std::string &address)
 
 class receiver;
 
+/**
+ * Wrapper around base stream class that forwards to a receiver.
+ */
 class bf_stream : public spead2::recv::stream
 {
 private:
@@ -645,7 +674,7 @@ public:
  * freeing. It is thus safe to free the stream even if there are still
  * allocated values outstanding.
  *
- * If it allocates memory from a slices, it sets a non-zero value in the
+ * If it allocates memory from a slice, it sets a non-zero value in the
  * user field.
  */
 class bf_raw_allocator : public spead2::memory_allocator
@@ -689,6 +718,7 @@ private:
     /// Depth of window
     static constexpr std::size_t window_size = 2;
 
+    // Metadata extracted from the stream
     std::int64_t ticks_between_spectra = -1;
     int channels = -1;
     int spectra_per_heap = -1;
@@ -698,13 +728,30 @@ private:
     int frequency_id = -1;
     int ticks_between_spectra_id = -1;
     int channels_id = -1;
+
     state_t state = state_t::METADATA;
     std::int64_t first_timestamp = -1;
 
     // Values computed from metadata by prepare_for_data
     std::size_t payload_size = 0;
 
-    std::unique_ptr<spead2::ringbuffer<slice>> ring, free_ring;
+    /**
+     * Filled (or partially filled) slices. These are guaranteed to be provided
+     * to the consumer in order.
+     *
+     * This is only set once the metadata has been received.
+     */
+    std::unique_ptr<spead2::ringbuffer<slice>> ring;
+
+    /**
+     * The consumer puts processed rings back here. It is used as a source of
+     * pre-allocated objects.
+     *
+     * This is only set once the metadata has been received.
+     */
+    std::unique_ptr<spead2::ringbuffer<slice>> free_ring;
+
+    /// Promise backing metadata_ready
     std::promise<bool> metadata_ready_promise;
 
     spead2::thread_pool worker;
@@ -735,6 +782,12 @@ private:
         std::int64_t timestamp, int channel,
         std::int64_t &spectrum, std::size_t &heap_offset, std::size_t &present_idx);
 
+    /**
+     * Obtain a pointer to an allocated slice. It returns @c nullptr if the
+     * timestamp is too far in the past.
+     *
+     * This can block if @c free_ring is empty.
+     */
     slice *get_slice(std::int64_t timestamp, std::int64_t spectrum);
 
     /**
@@ -771,8 +824,11 @@ public:
      */
     std::future<bool> metadata_ready;
 
-    /* Accessors for metadata. These can only be accessed once metadata_ready
-     * is set and the value is true.
+    /* Accessors for metadata. These can only be accessed once
+     * @ref metadata_ready is set and the value is true.
+     *
+     * Note: the asserts are technically race conditions, because the
+     * state can still mutate to STOP in another thread.
      */
 #define METADATA_ACCESSOR(name) \
     decltype(name) BOOST_PP_CAT(get_, name)() const \
@@ -1186,8 +1242,12 @@ void receiver::graceful_stop()
 
 void receiver::stop()
 {
-    // Stop the ring first, so that we unblock the internals if they
-    // are waiting for space in ring.
+    /* Stop the ring first, so that we unblock the internals if they
+     * are waiting for space in ring.
+     *
+     * TODO: there is a race condition here, because the worker thread can
+     * update state.
+     */
     if (state == state_t::DATA)
         ring->stop();
     stream.stop();
