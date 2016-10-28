@@ -965,7 +965,7 @@ void receiver::prepare_for_data()
     stream.set_memory_allocator(std::move(allocator));
 
     state = state_t::DATA;
-    ring.push(slice()); // sentinel to indicate that the metadata is ready
+    ring.emplace();  // sentinel to indicate that the metadata is ready
 }
 
 void receiver::process_metadata(const spead2::recv::heap &h)
