@@ -735,22 +735,6 @@ private:
     // Values computed from metadata by prepare_for_data
     std::size_t payload_size = 0;
 
-    /**
-     * Filled (or partially filled) slices. These are guaranteed to be provided
-     * to the consumer in order.
-     *
-     * This is only set once the metadata has been received.
-     */
-    std::unique_ptr<spead2::ringbuffer<slice>> ring;
-
-    /**
-     * The consumer puts processed rings back here. It is used as a source of
-     * pre-allocated objects.
-     *
-     * This is only set once the metadata has been received.
-     */
-    std::unique_ptr<spead2::ringbuffer<slice>> free_ring;
-
     /// Promise backing metadata_ready
     std::promise<bool> metadata_ready_promise;
 
@@ -818,6 +802,18 @@ private:
 
 public:
     /**
+     * Filled (or partially filled) slices. These are guaranteed to be provided
+     * to the consumer in order.
+     */
+    spead2::ringbuffer<slice> ring;
+
+    /**
+     * The consumer puts processed rings back here. It is used as a source of
+     * pre-allocated objects.
+     */
+    spead2::ringbuffer<slice> free_ring;
+
+    /**
      * Future to indicate that the metadata can safely be read. If the
      * value is @c false, it indicates that the stream was stopped before
      * metadata arrived.
@@ -842,18 +838,6 @@ public:
     METADATA_ACCESSOR(ticks_between_spectra)
     METADATA_ACCESSOR(payload_size)
 #undef METADATA_ACCESSOR
-
-    spead2::ringbuffer<slice> &get_ring() const
-    {
-        assert(state != state_t::METADATA);
-        return *ring;
-    }
-
-    spead2::ringbuffer<slice> &get_free_ring() const
-    {
-        assert(state != state_t::METADATA);
-        return *free_ring;
-    }
 
     /**
      * Retrieve first timestamp, or -1 if no data was received.
@@ -981,11 +965,8 @@ void receiver::prepare_for_data()
 
     payload_size = 2 * spectra_per_heap * channels_per_heap;
 
-    std::size_t free_slots = window_size + config.ring_slots + 1;
-    ring.reset(new spead2::ringbuffer<slice>(config.ring_slots));
-    free_ring.reset(new spead2::ringbuffer<slice>(free_slots));
-    for (std::size_t i = 0; i < free_slots; i++)
-        free_ring->push(make_slice());
+    for (std::size_t i = 0; i < window_size + config.ring_slots + 1; i++)
+        free_ring.push(make_slice());
 
     stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
     std::shared_ptr<spead2::memory_allocator> allocator =
@@ -1088,7 +1069,7 @@ slice *receiver::get_slice(std::int64_t timestamp, std::int64_t spectrum)
         }
         if (!s->data)
         {
-            *s = free_ring->pop();
+            *s = free_ring.pop();
             s->timestamp = timestamp;
             s->spectrum = spectrum;
         }
@@ -1148,7 +1129,7 @@ void receiver::flush(slice &s)
                 if (!s.present[i])
                     std::memset(s.data.get() + offset, 0, payload_size);
         }
-        ring->push(std::move(s));
+        ring.push(std::move(s));
     }
     s.spectrum = -1;
     s.n_present = 0;
@@ -1228,10 +1209,10 @@ void receiver::stop_received()
         catch (spead2::ringbuffer_stopped)
         {
         }
-        ring->stop();
     }
-    if (state == state_t::METADATA)
+    else if (state == state_t::METADATA)
         metadata_ready_promise.set_value(false);
+    ring.stop();
     state = state_t::STOP;
 }
 
@@ -1244,12 +1225,8 @@ void receiver::stop()
 {
     /* Stop the ring first, so that we unblock the internals if they
      * are waiting for space in ring.
-     *
-     * TODO: there is a race condition here, because the worker thread can
-     * update state.
      */
-    if (state == state_t::DATA)
-        ring->stop();
+    ring.stop();
     stream.stop();
 }
 
@@ -1257,6 +1234,8 @@ receiver::receiver(const session_config &config)
     : window<slice, receiver>(window_size),
     config(config),
     worker(1, affinity_vector(config.network_affinity)),
+    ring(config.ring_slots),
+    free_ring(window_size + config.ring_slots + 1),
     metadata_ready(metadata_ready_promise.get_future()),
     stream(*this, config.live_heaps)
 {
@@ -1398,8 +1377,8 @@ void session::run_impl()
     int channels_per_heap = recv.get_channels_per_heap();
     int spectra_per_heap = recv.get_spectra_per_heap();
     std::int64_t ticks_between_spectra = recv.get_ticks_between_spectra();
-    spead2::ringbuffer<slice> &ring = recv.get_ring();
-    spead2::ringbuffer<slice> &free_ring = recv.get_free_ring();
+    spead2::ringbuffer<slice> &ring = recv.ring;
+    spead2::ringbuffer<slice> &free_ring = recv.free_ring;
 
     hdf5_writer w(config.filename, config.direct,
                   channels, channels_per_heap, spectra_per_heap, ticks_between_spectra);
