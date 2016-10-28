@@ -735,9 +735,6 @@ private:
     // Values computed from metadata by prepare_for_data
     std::size_t payload_size = 0;
 
-    /// Promise backing metadata_ready
-    std::promise<bool> metadata_ready_promise;
-
     spead2::thread_pool worker;
     bf_stream stream;
 
@@ -803,7 +800,8 @@ private:
 public:
     /**
      * Filled (or partially filled) slices. These are guaranteed to be provided
-     * to the consumer in order.
+     * to the consumer in order. The first element pushed is a
+     * default-constructed slice, indicating only that the metadata is ready.
      */
     spead2::ringbuffer<slice> ring;
 
@@ -813,15 +811,8 @@ public:
      */
     spead2::ringbuffer<slice> free_ring;
 
-    /**
-     * Future to indicate that the metadata can safely be read. If the
-     * value is @c false, it indicates that the stream was stopped before
-     * metadata arrived.
-     */
-    std::future<bool> metadata_ready;
-
     /* Accessors for metadata. These can only be accessed once
-     * @ref metadata_ready is set and the value is true.
+     * the metadata is ready.
      *
      * Note: the asserts are technically race conditions, because the
      * state can still mutate to STOP in another thread.
@@ -974,7 +965,7 @@ void receiver::prepare_for_data()
     stream.set_memory_allocator(std::move(allocator));
 
     state = state_t::DATA;
-    metadata_ready_promise.set_value(true);
+    ring.push(slice()); // sentinel to indicate that the metadata is ready
 }
 
 void receiver::process_metadata(const spead2::recv::heap &h)
@@ -1208,10 +1199,9 @@ void receiver::stop_received()
         }
         catch (spead2::ringbuffer_stopped)
         {
+            // can get here is we were called via receiver::stop
         }
     }
-    else if (state == state_t::METADATA)
-        metadata_ready_promise.set_value(false);
     ring.stop();
     state = state_t::STOP;
 }
@@ -1234,10 +1224,9 @@ receiver::receiver(const session_config &config)
     : window<slice, receiver>(window_size),
     config(config),
     worker(1, affinity_vector(config.network_affinity)),
+    stream(*this, config.live_heaps),
     ring(config.ring_slots),
-    free_ring(window_size + config.ring_slots + 1),
-    metadata_ready(metadata_ready_promise.get_future()),
-    stream(*this, config.live_heaps)
+    free_ring(window_size + config.ring_slots + 1)
 {
     spead2::release_gil gil;
 
@@ -1366,8 +1355,14 @@ void session::run_impl()
     if (config.disk_affinity >= 0)
         spead2::thread_pool::set_affinity(config.disk_affinity);
 
-    bool have_metadata = recv.metadata_ready.get();
-    if (!have_metadata)
+    spead2::ringbuffer<slice> &ring = recv.ring;
+    spead2::ringbuffer<slice> &free_ring = recv.free_ring;
+    // Wait for the metadata
+    try
+    {
+        ring.pop();
+    }
+    catch (spead2::ringbuffer_stopped)
     {
         recv.stop();
         return;   // stream stopped before we saw the metadata
@@ -1377,8 +1372,6 @@ void session::run_impl()
     int channels_per_heap = recv.get_channels_per_heap();
     int spectra_per_heap = recv.get_spectra_per_heap();
     std::int64_t ticks_between_spectra = recv.get_ticks_between_spectra();
-    spead2::ringbuffer<slice> &ring = recv.ring;
-    spead2::ringbuffer<slice> &free_ring = recv.free_ring;
 
     hdf5_writer w(config.filename, config.direct,
                   channels, channels_per_heap, spectra_per_heap, ticks_between_spectra);
