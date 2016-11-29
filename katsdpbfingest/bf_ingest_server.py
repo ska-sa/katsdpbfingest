@@ -60,9 +60,9 @@ class _CaptureSession(object):
         self._args = args
         self.filename = os.path.join(args.file_base, '{}.h5'.format(int(time.time())))
 
-        endpoint = args.cbf_spead
-        address = socket.gethostbyname(endpoint.host)
-        config = SessionConfig(self.filename, address, endpoint.port)
+        config = SessionConfig(self.filename)
+        for endpoint in args.cbf_spead:
+            config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
         if args.interface is not None:
             config.interface_address = _get_interface_address(args.interface)
         config.ibv = args.ibv
@@ -96,13 +96,13 @@ class _CaptureSession(object):
         pool = concurrent.futures.ThreadPoolExecutor(1)
         try:
             yield From(self._loop.run_in_executor(pool, self._session.join))
-            if self._session.n_dumps > 0:
+            if self._session.n_heaps > 0:
                 # Write the metadata to file
                 if self._args.telstate is not None:
                     self._write_metadata()
             _logger.info('Capture complete, %d heaps, of which %d dropped',
-                         self._session.n_total_dumps,
-                         self._session.n_total_dumps - self._session.n_dumps)
+                         self._session.n_total_heaps,
+                         self._session.n_total_heaps - self._session.n_heaps)
         except Exception as e:
             _logger.error("Capture threw exception", exc_info=True)
 
