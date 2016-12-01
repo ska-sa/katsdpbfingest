@@ -51,9 +51,6 @@ def main():
     args = parser.parse_args()
     if args.affinity and len(args.affinity) < 2:
         parser.error('At least 2 CPUs must be specified for --affinity')
-    if len(args.cbf_spead) != 1:
-        parser.error('Exactly one endpoint must be specified')
-    args.cbf_spead = args.cbf_spead[0]
     configure_logging(args.log_level)
     if not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)
