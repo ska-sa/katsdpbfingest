@@ -622,6 +622,16 @@ struct session_config
     int disk_affinity = -1;
     bool direct = false;
 
+    /* Metadata derived from telescope state. If left at defaults, it will
+     * be extracted from metadata SPEAD items.
+     */
+    std::int64_t ticks_between_spectra = -1;
+    int channels = -1;
+    int spectra_per_heap = -1;
+    int channels_per_heap = -1;
+    /// Whether to use metadata in the SPEAD stream
+    bool spead_metadata = true;
+
     explicit session_config(const std::string &filename);
     void add_endpoint(const std::string &bind_host, std::uint16_t port);
     std::string get_interface_address() const;
@@ -718,16 +728,16 @@ private:
     /// Depth of window
     static constexpr std::size_t window_size = 2;
 
-    // Metadata extracted from the stream
+    // Metadata extracted from the stream or the session_config
     std::int64_t ticks_between_spectra = -1;
     int channels = -1;
     int spectra_per_heap = -1;
     int channels_per_heap = -1;
-    int bf_raw_id = -1;
-    int timestamp_id = -1;
-    int frequency_id = -1;
-    int ticks_between_spectra_id = -1;
-    int channels_id = -1;
+    int bf_raw_id = 0x5000;
+    int timestamp_id = 0x1600;
+    int frequency_id = 0x4103;
+    int ticks_between_spectra_id = 0x104A;
+    int channels_id = 0x1009;
 
     state_t state = state_t::METADATA;
     std::int64_t first_timestamp = -1;
@@ -782,6 +792,13 @@ private:
      *          valid data heap.
      */
     std::uint8_t *allocate(std::size_t size, const spead2::recv::packet_header &packet);
+
+    /**
+     * Checks whether all necessary metadata has been received. Once this is
+     * true, we are ready to move to state @ref DATA via
+     * @ref prepare_for_data.
+     */
+    bool metadata_ready() const;
 
     /// Called once the metadata is received, to switch to data-receiving mode
     void prepare_for_data();
@@ -950,6 +967,14 @@ void receiver::emplace_readers()
     }
 }
 
+bool receiver::metadata_ready() const
+{
+    // frequency_id is excluded, since v3 of the ICD does not include it.
+    return channels > 0 && channels_per_heap > 0
+        && spectra_per_heap > 0 && ticks_between_spectra > 0
+        && bf_raw_id != -1 && timestamp_id != -1;
+}
+
 void receiver::prepare_for_data()
 {
     logger(spead2::log_level::info, "metadata received");
@@ -991,21 +1016,19 @@ void receiver::process_metadata(const spead2::recv::heap &h)
         else if (descriptor.name == "frequency")
             frequency_id = descriptor.id;
     }
-    for (const auto item : h.get_items())
+    if (config.spead_metadata)
     {
-        if (item.id == ticks_between_spectra_id)
-            ticks_between_spectra = item.immediate_value;
-        else if (item.id == channels_id)
-            channels = item.immediate_value;
+        for (const auto item : h.get_items())
+        {
+            if (item.id == ticks_between_spectra_id)
+                ticks_between_spectra = item.immediate_value;
+            else if (item.id == channels_id)
+                channels = item.immediate_value;
+        }
     }
 
-    // frequency_id is excluded, since v3 of the ICD does not include it.
-    if (channels > 0 && channels_per_heap > 0
-        && spectra_per_heap > 0 && ticks_between_spectra > 0
-        && bf_raw_id != -1 && timestamp_id != -1)
-    {
+    if (metadata_ready())
         prepare_for_data();
-    }
 }
 
 bool receiver::parse_timestamp_channel(
@@ -1223,6 +1246,9 @@ void receiver::stop()
 receiver::receiver(const session_config &config)
     : window<slice, receiver>(window_size),
     config(config),
+    ticks_between_spectra(config.ticks_between_spectra),
+    channels(config.channels),
+    spectra_per_heap(config.spectra_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
     stream(*this, config.live_heaps),
     ring(config.ring_slots),
@@ -1256,6 +1282,9 @@ receiver::receiver(const session_config &config)
                 use_ibv = false;
             }
         }
+
+        if (metadata_ready())
+            prepare_for_data();
 
         emplace_readers();
     }
@@ -1455,6 +1484,11 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         .def_readwrite("network_affinity", &session_config::network_affinity)
         .def_readwrite("disk_affinity", &session_config::disk_affinity)
         .def_readwrite("direct", &session_config::direct)
+        .def_readwrite("ticks_between_spectra", &session_config::ticks_between_spectra)
+        .def_readwrite("channels", &session_config::channels)
+        .def_readwrite("spectra_per_heap", &session_config::spectra_per_heap)
+        .def_readwrite("channels_per_heap", &session_config::channels_per_heap)
+        .def_readwrite("spead_metadata", &session_config::spead_metadata)
         .def("add_endpoint", &session_config::add_endpoint,
              (arg("bind_host"), arg("port")));
     ;

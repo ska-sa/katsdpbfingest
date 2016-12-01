@@ -71,8 +71,23 @@ class _CaptureSession(object):
             config.network_affinity = args.affinity[1]
         if args.direct_io:
             config.direct = True
+        config.spead_metadata = args.spead_metadata
+        self._config_from_telstate(config, 'ticks_between_spectra', 'ticks_between_spectra', False)
+        self._config_from_telstate(config, 'channels', 'n_chans')
+        self._config_from_telstate(config, 'channels_per_heap', 'n_chans_per_substream')
         self._session = Session(config)
         self._run_future = trollius.async(self._run(), loop=self._loop)
+
+    def _config_from_telstate(self, config, attr_name, telstate_name, use_stream_name=True):
+        if self._args.telstate is None or self._args.stream_name is None:
+            return
+        if use_stream_name:
+            normalised = self._args.stream_name.replace('.', '_')
+            telstate_name = '{}_{}'.format(normalised, telstate_name)
+        value = self._args.telstate.get('cbf_' + telstate_name)
+        if value is not None:
+            _logger.info('Setting %s to %s from telstate', attr_name, value)
+            setattr(config, attr_name, value)
 
     def _write_metadata(self):
         telstate = self._args.telstate
@@ -129,6 +144,7 @@ class CaptureServer(object):
         - file_base
         - buffer
         - affinity
+        - spead_metadata
 
     loop : :class:`trollius.BaseEventLoop`
         IO Loop for running coroutines
