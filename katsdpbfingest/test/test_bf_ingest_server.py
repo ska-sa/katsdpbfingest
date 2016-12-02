@@ -19,6 +19,13 @@ import spead2.send
 import socket
 
 
+class DummyTelescopeState(dict):
+    def wait_key(self, key, condition=None, timeout=None):
+        assert key in self
+        if condition:
+            assert condition(self[key])
+
+
 class TestSession(object):
     def setup(self):
         # To avoid collisions when running tests in parallel on a single host,
@@ -67,7 +74,7 @@ class TestCaptureServer(object):
     def _test_manual_stop_no_data(self):
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
         assert_false(server.capturing)
-        server.start_capture()
+        yield From(server.start_capture())
         assert_true(server.capturing)
         yield From(trollius.sleep(0.01, loop=self.loop))
         yield From(server.stop_capture())
@@ -94,16 +101,17 @@ class TestCaptureServer(object):
 
         if telstate_metadata:
             self.args.stream_name = 'corr.beam_0x'
-            self.args.telstate = {
+            self.args.telstate = DummyTelescopeState({
                 'cbf_corr_beam_0x_n_chans': n_channels,
                 'cbf_corr_beam_0x_n_chans_per_substream': channels_per_heap,
-                'cbf_ticks_between_spectra': ticks_between_spectra
-            }
+                'cbf_ticks_between_spectra': ticks_between_spectra,
+                'sdp_cam2telstate_status': 'ready'
+            })
             self.args.spead_metadata = False
 
         # Start up the server
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
-        filename = server.start_capture()
+        filename = yield From(server.start_capture())
         time.sleep(0.1)
         # Send it a SPEAD stream
         config = spead2.send.StreamConfig(max_packet_size=4196, rate=1e9 / 8)
