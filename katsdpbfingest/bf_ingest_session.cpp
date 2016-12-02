@@ -303,6 +303,8 @@ hdf5_bf_raw_writer::hdf5_bf_raw_writer(
     H5::DataSpace file_space(3, dims, maxdims);
     H5::DSetCreatPropList dcpl;
     dcpl.setChunk(3, chunk);
+    std::int8_t fill = 0;
+    dcpl.setFillValue(H5::PredType::NATIVE_INT8, &fill);
     dataset = parent.createDataSet(name, H5::PredType::STD_I8BE, file_space, dcpl);
 }
 
@@ -361,6 +363,8 @@ hdf5_timestamps_writer::hdf5_timestamps_writer(
     H5::DataSpace file_space(1, dims, maxdims);
     H5::DSetCreatPropList dcpl;
     dcpl.setChunk(1, &chunk);
+    std::uint64_t fill = 0;
+    dcpl.setFillValue(H5::PredType::NATIVE_UINT64, &fill);
     dataset = parent.createDataSet(
         name, H5::PredType::NATIVE_UINT64, file_space, dcpl);
     buffer = make_aligned<std::uint64_t>(chunk);
