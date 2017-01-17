@@ -67,7 +67,7 @@ class _CaptureSession(object):
     @classmethod
     def _config_from_telstate(cls, args, config, attr_name, telstate_name, use_stream_name=True):
         if use_stream_name:
-            normalised = args.stream_name.replace('.', '_')
+            normalised = args.stream_name.replace('.', '_').replace('-', '_')
             telstate_name = '{}_{}'.format(normalised, telstate_name)
         value = args.telstate.get('cbf_' + telstate_name)
         if value is not None:
