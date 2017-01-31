@@ -106,6 +106,7 @@ class _CaptureSession(object):
                 args, config, 'ticks_between_spectra', 'ticks_between_spectra', False)
             cls._config_from_telstate(args, config, 'channels', 'n_chans')
             cls._config_from_telstate(args, config, 'channels_per_heap', 'n_chans_per_substream')
+            cls._config_from_telstate(args, config, 'spectra_per_heap', 'spectra_per_heap')
         return config
 
     def _write_metadata(self):
