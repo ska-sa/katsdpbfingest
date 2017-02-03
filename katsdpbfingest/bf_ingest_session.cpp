@@ -1253,6 +1253,7 @@ receiver::receiver(const session_config &config)
     ticks_between_spectra(config.ticks_between_spectra),
     channels(config.channels),
     spectra_per_heap(config.spectra_per_heap),
+    channels_per_heap(config.channels_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
     stream(*this, config.live_heaps),
     ring(config.ring_slots),
