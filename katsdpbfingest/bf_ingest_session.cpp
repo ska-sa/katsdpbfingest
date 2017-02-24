@@ -1423,6 +1423,10 @@ void session::run_impl()
 
     boost::format progress_formatter("dropped %1% of %2%");
     bool done = false;
+    // Number of heaps in time between disk space checks
+    constexpr std::int64_t check_cadence = 1000;
+    // When time_heaps passes this value, we check disk space and log a message
+    std::int64_t next_check = check_cadence;
     while (!done)
     {
         try
@@ -1435,7 +1439,7 @@ void session::run_impl()
             if (total_heaps > n_total_heaps)
             {
                 n_total_heaps = total_heaps;
-                if (time_heaps % 1000 == 0)
+                if (time_heaps >= next_check)
                 {
                     progress_formatter % (n_total_heaps - n_heaps) % n_total_heaps;
                     logger(spead2::log_level::info, progress_formatter.str());
@@ -1446,6 +1450,9 @@ void session::run_impl()
                         logger(spead2::log_level::info, "stopping capture due to lack of free space");
                         done = true;
                     }
+                    // Find next multiple of check_cadence strictly greater
+                    // than time_heaps.
+                    next_check = (time_heaps / check_cadence + 1) * check_cadence;
                 }
             }
             free_ring.push(std::move(s));
