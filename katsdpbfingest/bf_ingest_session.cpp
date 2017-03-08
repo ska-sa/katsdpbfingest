@@ -1419,7 +1419,8 @@ void session::run_impl()
     struct statfs stat;
     if (fstatfs(fd, &stat) < 0)
         throw std::system_error(errno, std::system_category(), "fstatfs failed");
-    std::size_t reserve_blocks = (1024 * 1024 * 1024 + 1000 * recv.get_payload_size()) / stat.f_bsize;
+    std::size_t slice_size = 2 * spectra_per_heap * channels;
+    std::size_t reserve_blocks = (1024 * 1024 * 1024 + 1000 * slice_size) / stat.f_bsize;
 
     boost::format progress_formatter("dropped %1% of %2%");
     bool done = false;
