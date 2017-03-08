@@ -12,6 +12,7 @@ import sys
 import time
 import katsdptelstate.endpoint
 import spead2
+import katsdpservices
 from katsdpingest.bf_ingest_server import KatcpCaptureServer
 
 
@@ -24,23 +25,16 @@ def on_shutdown(server):
     trollius.get_event_loop().stop()
 
 
-def configure_logging(level):
-    formatter = logging.Formatter("%(asctime)s.%(msecs)03dZ - %(filename)s:%(lineno)s - %(levelname)s - %(message)s",
-                                  datefmt="%Y-%m-%d %H:%M:%S")
-    formatter.converter = time.gmtime
-    sh = logging.StreamHandler()
-    sh.setFormatter(formatter)
-    logging.root.addHandler(sh)
-    logging.root.setLevel(level.upper())
-
-
 def main():
-    parser = katsdptelstate.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    katsdpservices.setup_logging()
+    katsdpservices.setup_restart()
+    parser = katsdpservices.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--cbf-channels', type=int, help='unused, kept for backwards compatibility')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), default=':7148', help='endpoints to listen for CBF SPEAD stream (including multicast IPs). [<ip>[+<count>]][:port].', metavar='ENDPOINTS')
     parser.add_argument('--no-spead-metadata', dest='spead_metadata', default=True, action='store_false', help='Ignore metadata sent in SPEAD stream')
     parser.add_argument('--stream-name', type=str, metavar='NAME', help='Stream name for metadata in telstate')
-    parser.add_argument('--log-level', '-l', type=str, metavar='LEVEL', default='INFO', help='log level')
+    parser.add_argument('--log-level', '-l', type=str, metavar='LEVEL', default=None, help='log level')
     parser.add_argument('--file-base', default='.', type=str, help='base directory into which to write HDF5 files', metavar='DIR')
     parser.add_argument('--affinity', type=spead2.parse_range_list, help='List of CPUs to which to bind threads', metavar='CPU,CPU')
     parser.add_argument('--interface', type=str, help='Network interface for multicast subscription')
@@ -51,7 +45,8 @@ def main():
     args = parser.parse_args()
     if args.affinity and len(args.affinity) < 2:
         parser.error('At least 2 CPUs must be specified for --affinity')
-    configure_logging(args.log_level)
+    if args.log_level is not None:
+        logging.root.setLevel(args.log_level.upper())
     if not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)
         sys.exit(1)
