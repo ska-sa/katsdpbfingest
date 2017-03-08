@@ -617,7 +617,7 @@ struct session_config
     boost::asio::ip::address interface_address;
 
     std::size_t buffer_size = 32 * 1024 * 1024;
-    int live_heaps = 32;
+    int live_heaps_per_substream = 2;
     int ring_slots = 128;
     bool ibv = false;
     int comp_vector = 0;
@@ -1261,7 +1261,7 @@ receiver::receiver(const session_config &config)
     spectra_per_heap(config.spectra_per_heap),
     channels_per_heap(config.channels_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
-    stream(*this, config.live_heaps),
+    stream(*this, config.channels / config.channels_per_heap * config.live_heaps_per_substream),
     ring(config.ring_slots),
     free_ring(window_size + config.ring_slots + 1)
 {
@@ -1495,7 +1495,7 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         .def_readwrite("filename", &session_config::filename)
         .add_property("interface_address", &session_config::get_interface_address, &session_config::set_interface_address)
         .def_readwrite("buffer_size", &session_config::buffer_size)
-        .def_readwrite("live_heaps", &session_config::live_heaps)
+        .def_readwrite("live_heaps_per_substream", &session_config::live_heaps_per_substream)
         .def_readwrite("ring_slots", &session_config::ring_slots)
         .def_readwrite("ibv", &session_config::ibv)
         .def_readwrite("comp_vector", &session_config::comp_vector)
