@@ -1261,7 +1261,7 @@ receiver::receiver(const session_config &config)
     spectra_per_heap(config.spectra_per_heap),
     channels_per_heap(config.channels_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
-    stream(*this, config.channels / config.channels_per_heap * config.live_heaps_per_substream),
+    stream(*this, std::max(1, config.channels / config.channels_per_heap) * config.live_heaps_per_substream),
     ring(config.ring_slots),
     free_ring(window_size + config.ring_slots + 1)
 {
