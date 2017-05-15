@@ -36,10 +36,8 @@
 #include <future>
 #include <cstdint>
 #include <unistd.h>
-#include <boost/lexical_cast.hpp>
-#include <boost/regex.hpp>
-#include <boost/dynamic_bitset.hpp>
-#include <boost/preprocessor/cat.hpp>
+#include <regex>
+#include <boost/format.hpp>
 #include <spead2/recv_stream.h>
 #include <spead2/recv_heap.h>
 #include <spead2/recv_utils.h>
@@ -49,19 +47,43 @@
 #include <spead2/recv_udp.h>
 #include <spead2/common_memory_pool.h>
 #include <spead2/common_thread_pool.h>
-#include <spead2/py_common.h>
 #include <sys/mman.h>
 #include <sys/vfs.h>
 #include <system_error>
 #include <cerrno>
 #include <cstdlib>
 #include <H5Cpp.h>
-#include <boost/python.hpp>
+#include <pybind11/pybind11.h>
 
-namespace py = boost::python;
+namespace py = pybind11;
 
 static constexpr int ALIGNMENT = 4096;
-static spead2::log_function_python logger;
+
+class log_function_python
+{
+private:
+    py::object logger;
+
+public:
+    log_function_python() = default;
+    explicit log_function_python(py::object logger) : logger(std::move(logger)) {}
+
+    void operator()(spead2::log_level level, const std::string &msg)
+    {
+        static const char *const level_methods[] =
+        {
+            "warning",
+            "info",
+            "debug"
+        };
+        unsigned int level_idx = static_cast<unsigned int>(level);
+        assert(level_idx < sizeof(level_methods) / sizeof(level_methods[0]));
+        py::gil_scoped_acquire gil;
+        logger.attr(level_methods[level_idx])("%s", msg);
+    }
+};
+
+static log_function_python logger;
 
 /**
  * Recursively push a variadic list of arguments into a @c boost::format. This
@@ -240,9 +262,9 @@ static std::vector<spead2::s_item_pointer_t> get_shape(const spead2::descriptor 
     {
         // Slightly hacky approach to find out the shape (without
         // trying to implement a Python interpreter)
-        boost::regex expr("['\"]shape['\"]:\\s*\\(([^)]*)\\)");
-        boost::smatch what;
-        if (regex_search(descriptor.numpy_header, what, expr, boost::match_extra))
+        std::regex expr("['\"]shape['\"]:\\s*\\(([^)]*)\\)");
+        std::smatch what;
+        if (regex_search(descriptor.numpy_header, what, expr))
         {
             std::vector<s_item_pointer_t> shape;
             std::string inside = what[1];
@@ -273,7 +295,7 @@ struct slice
     std::int64_t spectrum = -1;        ///< Number of spectra since start
     unsigned int n_present = 0;        ///< Number of 1 bits in @a present
     aligned_ptr<std::uint8_t> data;    ///< Payload: channel-major, time-minor
-    boost::dynamic_bitset<> present;   ///< Bitmask of present heaps
+    std::vector<bool> present;         ///< Bitmask of present heaps
 };
 
 class hdf5_bf_raw_writer
@@ -839,7 +861,7 @@ public:
      * state can still mutate to STOP in another thread.
      */
 #define METADATA_ACCESSOR(name) \
-    decltype(name) BOOST_PP_CAT(get_, name)() const \
+    decltype(name) get_ ## name() const \
     {                                               \
         assert(state != state_t::METADATA);         \
         return name;                                \
@@ -1157,7 +1179,10 @@ void receiver::flush(slice &s)
     }
     s.spectrum = -1;
     s.n_present = 0;
-    s.present.reset();
+    // Clear all the bits by resizing down to zero then back to original size
+    auto orig_size = s.present.size();
+    s.present.clear();
+    s.present.resize(orig_size);
 }
 
 void receiver::process_data(const spead2::recv::heap &h)
@@ -1265,7 +1290,7 @@ receiver::receiver(const session_config &config)
     ring(config.ring_slots),
     free_ring(window_size + config.ring_slots + 1)
 {
-    spead2::release_gil gil;
+    py::gil_scoped_release gil;
 
     try
     {
@@ -1351,7 +1376,7 @@ session::session(const session_config &config) :
 
 session::~session()
 {
-    spead2::release_gil gil;
+    py::gil_scoped_release gil;
     recv.stop();
     if (run_future.valid())
         run_future.wait();   // don't get(), since that could throw
@@ -1359,7 +1384,7 @@ session::~session()
 
 void session::join()
 {
-    spead2::release_gil gil;
+    py::gil_scoped_release gil;
     if (run_future.valid())
     {
         run_future.wait();
@@ -1373,7 +1398,7 @@ void session::join()
 
 void session::stop_stream()
 {
-    spead2::release_gil gil;
+    py::gil_scoped_release gil;
     recv.graceful_stop();
 }
 
@@ -1487,14 +1512,15 @@ std::int64_t session::get_first_timestamp() const
     return recv.get_first_timestamp();
 }
 
-BOOST_PYTHON_MODULE(_bf_ingest_session)
+PYBIND11_PLUGIN(_bf_ingest_session)
 {
-    using namespace boost::python;
+    using namespace pybind11::literals;
+    py::module m("_bf_ingest_session", "C++ backend of beamformer capture");
 
-    class_<session_config>("SessionConfig",
-        init<const std::string &>(arg("filename")))
+    py::class_<session_config>(m, "SessionConfig", "Configuration data for the backend")
+        .def(py::init<const std::string &>(), "filename"_a)
         .def_readwrite("filename", &session_config::filename)
-        .add_property("interface_address", &session_config::get_interface_address, &session_config::set_interface_address)
+        .def_property("interface_address", &session_config::get_interface_address, &session_config::set_interface_address)
         .def_readwrite("buffer_size", &session_config::buffer_size)
         .def_readwrite("live_heaps_per_substream", &session_config::live_heaps_per_substream)
         .def_readwrite("ring_slots", &session_config::ring_slots)
@@ -1508,21 +1534,22 @@ BOOST_PYTHON_MODULE(_bf_ingest_session)
         .def_readwrite("spectra_per_heap", &session_config::spectra_per_heap)
         .def_readwrite("channels_per_heap", &session_config::channels_per_heap)
         .def_readwrite("spead_metadata", &session_config::spead_metadata)
-        .def("add_endpoint", &session_config::add_endpoint,
-             (arg("bind_host"), arg("port")));
+        .def("add_endpoint", &session_config::add_endpoint, "bind_host"_a, "port"_a);
     ;
-    class_<session, boost::noncopyable>("Session",
-        init<const session_config &>(arg("config")))
+    py::class_<session>(m, "Session", "Capture session")
+        .def(py::init<const session_config &>(), "config"_a)
         .def("join", &session::join)
         .def("stop_stream", &session::stop_stream)
-        .add_property("n_heaps", &session::get_n_heaps)
-        .add_property("n_total_heaps", &session::get_n_total_heaps)
-        .add_property("first_timestamp", &session::get_first_timestamp)
+        .def_property_readonly("n_heaps", &session::get_n_heaps)
+        .def_property_readonly("n_total_heaps", &session::get_n_total_heaps)
+        .def_property_readonly("first_timestamp", &session::get_first_timestamp)
     ;
 
-    object logging_module = import("logging");
-    object spead2_logger = logging_module.attr("getLogger")("spead2");
-    object my_logger = logging_module.attr("getLogger")("katsdpingest.bf_ingest_session");
-    spead2::set_log_function(spead2::log_function_python(spead2_logger));
-    logger = spead2::log_function_python(my_logger);
+    py::object logging_module = py::module::import("logging");
+    py::object spead2_logger = logging_module.attr("getLogger")("spead2");
+    py::object my_logger = logging_module.attr("getLogger")("katsdpingest.bf_ingest_session");
+    spead2::set_log_function(log_function_python(spead2_logger));
+    logger = log_function_python(my_logger);
+
+    return m.ptr();
 }
