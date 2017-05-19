@@ -47,6 +47,7 @@
 #include <spead2/recv_udp.h>
 #include <spead2/common_memory_pool.h>
 #include <spead2/common_thread_pool.h>
+#include <spead2/py_common.h>
 #include <sys/mman.h>
 #include <sys/vfs.h>
 #include <system_error>
@@ -58,32 +59,7 @@
 namespace py = pybind11;
 
 static constexpr int ALIGNMENT = 4096;
-
-class log_function_python
-{
-private:
-    py::object logger;
-
-public:
-    log_function_python() = default;
-    explicit log_function_python(py::object logger) : logger(std::move(logger)) {}
-
-    void operator()(spead2::log_level level, const std::string &msg)
-    {
-        static const char *const level_methods[] =
-        {
-            "warning",
-            "info",
-            "debug"
-        };
-        unsigned int level_idx = static_cast<unsigned int>(level);
-        assert(level_idx < sizeof(level_methods) / sizeof(level_methods[0]));
-        py::gil_scoped_acquire gil;
-        logger.attr(level_methods[level_idx])("%s", msg);
-    }
-};
-
-static log_function_python logger;
+static spead2::log_function_python logger;
 
 /**
  * Recursively push a variadic list of arguments into a @c boost::format. This
@@ -1548,8 +1524,8 @@ PYBIND11_PLUGIN(_bf_ingest_session)
     py::object logging_module = py::module::import("logging");
     py::object spead2_logger = logging_module.attr("getLogger")("spead2");
     py::object my_logger = logging_module.attr("getLogger")("katsdpingest.bf_ingest_session");
-    spead2::set_log_function(log_function_python(spead2_logger));
-    logger = log_function_python(my_logger);
+    spead2::set_log_function(spead2::log_function_python(spead2_logger));
+    logger = spead2::log_function_python(my_logger);
 
     return m.ptr();
 }
