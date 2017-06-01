@@ -2,6 +2,7 @@
 
 import logging
 import katsdptelstate
+import netifaces
 
 
 _logger = logging.getLogger(__name__)
@@ -17,6 +18,13 @@ def set_telstate_entry(telstate, name, value, prefix=None, attribute=True):
             old = telstate.get(name)
             _logger.warning('Attribute %s could not be set to %s because it is already set to %s',
                             name, value, old)
+
+
+def get_interface_address(interface):
+    if interface is None:
+        return None
+    else:
+        return netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
 
 
 class Range(object):
@@ -122,4 +130,4 @@ class Range(object):
 
 
 
-__all__ = ['set_telstate_entry', 'Range']
+__all__ = ['set_telstate_entry', 'get_interface_address', 'Range']
