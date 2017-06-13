@@ -20,13 +20,6 @@ def set_telstate_entry(telstate, name, value, prefix=None, attribute=True):
                             name, value, old)
 
 
-def get_interface_address(interface):
-    if interface is None:
-        return None
-    else:
-        return netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
-
-
 class Range(object):
     """Representation of a range of values, as specified by a first and a
     past-the-end value. This can be seen as an extended form of `xrange` or

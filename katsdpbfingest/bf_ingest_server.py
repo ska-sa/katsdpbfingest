@@ -16,6 +16,7 @@ from trollius import From, Return
 import tornado
 import logging
 import katsdpingest
+import katsdpservices
 import psutil
 import ipaddress
 import netifaces
@@ -25,10 +26,6 @@ import concurrent.futures
 
 
 _logger = logging.getLogger(__name__)
-
-
-def _get_interface_address(interface):
-    return netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
 
 
 class _CaptureSession(object):
@@ -90,7 +87,7 @@ class _CaptureSession(object):
         for endpoint in args.cbf_spead:
             config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
         if args.interface is not None:
-            config.interface_address = _get_interface_address(args.interface)
+            config.interface_address = katsdpservices.get_interface_address(args.interface)
         config.ibv = args.ibv
         if args.affinity:
             config.disk_affinity = args.affinity[0]
