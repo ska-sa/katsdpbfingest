@@ -30,7 +30,6 @@ def main():
     katsdpservices.setup_restart()
     parser = katsdpservices.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--cbf-channels', type=int, help='unused, kept for backwards compatibility')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), default=':7148', help='endpoints to listen for CBF SPEAD stream (including multicast IPs). [<ip>[+<count>]][:port].', metavar='ENDPOINTS')
     parser.add_argument('--no-spead-metadata', dest='spead_metadata', default=True, action='store_false', help='Ignore metadata sent in SPEAD stream')
     parser.add_argument('--stream-name', type=str, metavar='NAME', help='Stream name for metadata in telstate')
@@ -50,8 +49,6 @@ def main():
     if not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)
         sys.exit(1)
-    if args.cbf_channels is not None:
-        logging.warn('Option --cbf-channels is unused and will be removed in future')
     ioloop = AsyncIOMainLoop()
     ioloop.install()
     server = KatcpCaptureServer(args, trollius.get_event_loop())

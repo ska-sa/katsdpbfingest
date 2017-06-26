@@ -19,7 +19,6 @@ import katsdpingest
 import katsdpservices
 import psutil
 import ipaddress
-import netifaces
 import socket
 import contextlib
 import concurrent.futures
