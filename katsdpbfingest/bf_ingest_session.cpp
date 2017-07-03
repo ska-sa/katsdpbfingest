@@ -229,39 +229,6 @@ static H5::DSetMemXferPropList make_dxpl_direct(std::size_t size)
     return dxpl;
 }
 
-// Parse the shape from either the shape field or the numpy header
-static std::vector<spead2::s_item_pointer_t> get_shape(const spead2::descriptor &descriptor)
-{
-    using spead2::s_item_pointer_t;
-
-    if (!descriptor.numpy_header.empty())
-    {
-        // Slightly hacky approach to find out the shape (without
-        // trying to implement a Python interpreter)
-        std::regex expr("['\"]shape['\"]:\\s*\\(([^)]*)\\)");
-        std::smatch what;
-        if (regex_search(descriptor.numpy_header, what, expr))
-        {
-            std::vector<s_item_pointer_t> shape;
-            std::string inside = what[1];
-            std::replace(inside.begin(), inside.end(), ',', ' ');
-            std::istringstream tokeniser(inside);
-            s_item_pointer_t cur;
-            while (tokeniser >> cur)
-            {
-                shape.push_back(cur);
-            }
-            if (!tokeniser.eof())
-                throw std::runtime_error("could not parse shape (" + inside + ")");
-            return shape;
-        }
-        else
-            throw std::runtime_error("could not parse numpy header " + descriptor.numpy_header);
-    }
-    else
-        return descriptor.shape;
-}
-
 /**
  * Storage for all the heaps that share a timestamp.
  */
@@ -624,15 +591,11 @@ struct session_config
     int disk_affinity = -1;
     bool direct = false;
 
-    /* Metadata derived from telescope state. If left at defaults, it will
-     * be extracted from metadata SPEAD items.
-     */
+    // Metadata derived from telescope state.
     std::int64_t ticks_between_spectra = -1;
     int channels = -1;
     int spectra_per_heap = -1;
     int channels_per_heap = -1;
-    /// Whether to use metadata in the SPEAD stream
-    bool spead_metadata = true;
 
     explicit session_config(const std::string &filename);
     void add_endpoint(const std::string &bind_host, std::uint16_t port);
@@ -719,7 +682,6 @@ private:
 
     enum class state_t
     {
-        METADATA,     ///< Waiting for metadata
         DATA,         ///< Receiving data
         STOP          ///< Have seen stop packet or been asked to stop
     };
@@ -730,22 +692,20 @@ private:
     /// Depth of window
     static constexpr std::size_t window_size = 2;
 
-    // Metadata extracted from the stream or the session_config
-    std::int64_t ticks_between_spectra = -1;
-    int channels = -1;
-    int spectra_per_heap = -1;
-    int channels_per_heap = -1;
-    int bf_raw_id = 0x5000;
-    int timestamp_id = 0x1600;
-    int frequency_id = 0x4103;
-    int ticks_between_spectra_id = 0x104A;
-    int channels_id = 0x1009;
+    // Metadata copied from or computed from the session_config
+    const std::int64_t ticks_between_spectra;
+    const int channels;
+    const int spectra_per_heap;
+    const int channels_per_heap;
+    const std::size_t payload_size;
 
-    state_t state = state_t::METADATA;
+    // Hard-coded item IDs
+    static constexpr int bf_raw_id = 0x5000;
+    static constexpr int timestamp_id = 0x1600;
+    static constexpr int frequency_id = 0x4103;
+
+    state_t state = state_t::DATA;
     std::int64_t first_timestamp = -1;
-
-    // Values computed from metadata by prepare_for_data
-    std::size_t payload_size = 0;
 
     spead2::thread_pool worker;
     bf_stream stream;
@@ -758,7 +718,7 @@ private:
 
     /**
      * Process a timestamp and channel number from a heap into more useful
-     * indices. Note: this function modifies state by settings @ref
+     * indices. Note: this function modifies state by setting @ref
      * first_timestamp if this is the first (valid) call.
      *
      * @param timestamp        ADC timestamp
@@ -795,21 +755,8 @@ private:
      */
     std::uint8_t *allocate(std::size_t size, const spead2::recv::packet_header &packet);
 
-    /**
-     * Checks whether all necessary metadata has been received. Once this is
-     * true, we are ready to move to state @ref DATA via
-     * @ref prepare_for_data.
-     */
-    bool metadata_ready() const;
-
-    /// Called once the metadata is received, to switch to data-receiving mode
-    void prepare_for_data();
-
     /// Flush a single slice to the ringbuffer, if it has data
     void flush(slice &s);
-
-    void process_metadata(const spead2::recv::heap &h);
-    void process_data(const spead2::recv::heap &h);
 
     /// Called by bf_stream::heap_ready
     void heap_ready(const spead2::recv::heap &heap);
@@ -819,8 +766,7 @@ private:
 public:
     /**
      * Filled (or partially filled) slices. These are guaranteed to be provided
-     * to the consumer in order. The first element pushed is a
-     * default-constructed slice, indicating only that the metadata is ready.
+     * to the consumer in order.
      */
     spead2::ringbuffer<slice> ring;
 
@@ -829,25 +775,6 @@ public:
      * pre-allocated objects.
      */
     spead2::ringbuffer<slice> free_ring;
-
-    /* Accessors for metadata. These can only be accessed once
-     * the metadata is ready.
-     *
-     * Note: the asserts are technically race conditions, because the
-     * state can still mutate to STOP in another thread.
-     */
-#define METADATA_ACCESSOR(name) \
-    decltype(name) get_ ## name() const \
-    {                                               \
-        assert(state != state_t::METADATA);         \
-        return name;                                \
-    }
-    METADATA_ACCESSOR(channels)
-    METADATA_ACCESSOR(channels_per_heap)
-    METADATA_ACCESSOR(spectra_per_heap)
-    METADATA_ACCESSOR(ticks_between_spectra)
-    METADATA_ACCESSOR(payload_size)
-#undef METADATA_ACCESSOR
 
     /**
      * Retrieve first timestamp, or -1 if no data was received.
@@ -870,6 +797,9 @@ public:
 };
 
 constexpr std::size_t receiver::window_size;
+constexpr int receiver::bf_raw_id;
+constexpr int receiver::timestamp_id;
+constexpr int receiver::frequency_id;
 
 bf_stream::bf_stream(receiver &recv, std::size_t max_heaps)
     : spead2::recv::stream(recv.worker, 0, max_heaps),
@@ -967,76 +897,6 @@ void receiver::emplace_readers()
                     endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size);
         }
     }
-}
-
-bool receiver::metadata_ready() const
-{
-    // frequency_id is excluded, since v3 of the ICD does not include it.
-    logger(spead2::log_level::info, "checking whether metadata is ready");
-    log_format(spead2::log_level::info,
-               "channels=%1% channels_per_heap=%2% spectra_per_heap=%3% "
-               "ticks_between_spectra=%4% bf_raw_id=%5% timestamp_id=%6%",
-               channels, channels_per_heap, spectra_per_heap,
-               ticks_between_spectra, bf_raw_id, timestamp_id);
-    bool ready = channels > 0 && channels_per_heap > 0
-        && spectra_per_heap > 0 && ticks_between_spectra > 0
-        && bf_raw_id != -1 && timestamp_id != -1;
-    logger(spead2::log_level::info, ready ? "metadata is ready" : "metadata is not ready");
-    return ready;
-}
-
-void receiver::prepare_for_data()
-{
-    payload_size = 2 * spectra_per_heap * channels_per_heap;
-
-    for (std::size_t i = 0; i < window_size + config.ring_slots + 1; i++)
-        free_ring.push(make_slice());
-
-    stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
-    std::shared_ptr<spead2::memory_allocator> allocator =
-        std::make_shared<bf_raw_allocator>(*this);
-    stream.set_memory_allocator(std::move(allocator));
-
-    state = state_t::DATA;
-    ring.emplace();  // sentinel to indicate that the metadata is ready
-}
-
-void receiver::process_metadata(const spead2::recv::heap &h)
-{
-    for (const auto &descriptor : h.get_descriptors())
-    {
-        if (descriptor.name == "bf_raw")
-        {
-            auto shape = get_shape(descriptor);
-            if (shape.size() == 3 && shape[2] == 2)
-            {
-                channels_per_heap = shape[0];
-                spectra_per_heap = shape[1];
-            }
-            bf_raw_id = descriptor.id;
-        }
-        else if (descriptor.name == "timestamp")
-            timestamp_id = descriptor.id;
-        else if (descriptor.name == "ticks_between_spectra")
-            ticks_between_spectra_id = descriptor.id;
-        else if (descriptor.name == "n_chans")
-            channels_id = descriptor.id;
-        else if (descriptor.name == "frequency")
-            frequency_id = descriptor.id;
-    }
-    if (config.spead_metadata)
-    {
-        for (const auto item : h.get_items())
-        {
-            if (item.id == ticks_between_spectra_id)
-                ticks_between_spectra = item.immediate_value;
-            else if (item.id == channels_id)
-                channels = item.immediate_value;
-        }
-    }
-
-    if (metadata_ready())
-        prepare_for_data();
 }
 
 bool receiver::parse_timestamp_channel(
@@ -1161,8 +1021,10 @@ void receiver::flush(slice &s)
     s.present.resize(orig_size);
 }
 
-void receiver::process_data(const spead2::recv::heap &h)
+void receiver::heap_ready(const spead2::recv::heap &h)
 {
+    if (state != state_t::DATA)
+        return;
     std::int64_t timestamp = -1;
     int channel = 0;
     const spead2::recv::item *data_item = nullptr;
@@ -1208,21 +1070,6 @@ void receiver::process_data(const spead2::recv::heap &h)
     }
 }
 
-void receiver::heap_ready(const spead2::recv::heap &heap)
-{
-    switch (state)
-    {
-    case state_t::METADATA:
-        process_metadata(heap);
-        break;
-    case state_t::DATA:
-        process_data(heap);
-        break;
-    case state_t::STOP:
-        break;
-    }
-}
-
 void receiver::stop_received()
 {
     if (state == state_t::DATA)
@@ -1233,7 +1080,7 @@ void receiver::stop_received()
         }
         catch (spead2::ringbuffer_stopped)
         {
-            // can get here is we were called via receiver::stop
+            // can get here if we were called via receiver::stop
         }
     }
     ring.stop();
@@ -1261,11 +1108,21 @@ receiver::receiver(const session_config &config)
     channels(config.channels),
     spectra_per_heap(config.spectra_per_heap),
     channels_per_heap(config.channels_per_heap),
+    payload_size(2 * spectra_per_heap * channels_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
     stream(*this, std::max(1, config.channels / config.channels_per_heap) * config.live_heaps_per_substream),
     ring(config.ring_slots),
     free_ring(window_size + config.ring_slots + 1)
 {
+    if (channels <= 0)
+        throw std::invalid_argument("channels <= 0");
+    if (channels_per_heap <= 0)
+        throw std::invalid_argument("channels_per_heap <= 0");
+    if (spectra_per_heap <= 0)
+        throw std::invalid_argument("spectra_per_heap <= 0");
+    if (ticks_between_spectra <= 0)
+        throw std::invalid_argument("ticks_between_spectra <= 0");
+
     py::gil_scoped_release gil;
 
     try
@@ -1295,8 +1152,13 @@ receiver::receiver(const session_config &config)
             }
         }
 
-        if (metadata_ready())
-            prepare_for_data();
+        for (std::size_t i = 0; i < window_size + config.ring_slots + 1; i++)
+            free_ring.push(make_slice());
+
+        stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
+        std::shared_ptr<spead2::memory_allocator> allocator =
+            std::make_shared<bf_raw_allocator>(*this);
+        stream.set_memory_allocator(std::move(allocator));
 
         emplace_readers();
     }
@@ -1398,21 +1260,11 @@ void session::run_impl()
 
     spead2::ringbuffer<slice> &ring = recv.ring;
     spead2::ringbuffer<slice> &free_ring = recv.free_ring;
-    // Wait for the metadata
-    try
-    {
-        ring.pop();
-    }
-    catch (spead2::ringbuffer_stopped)
-    {
-        recv.stop();
-        return;   // stream stopped before we saw the metadata
-    }
 
-    int channels = recv.get_channels();
-    int channels_per_heap = recv.get_channels_per_heap();
-    int spectra_per_heap = recv.get_spectra_per_heap();
-    std::int64_t ticks_between_spectra = recv.get_ticks_between_spectra();
+    int channels = config.channels;
+    int channels_per_heap = config.channels_per_heap;
+    int spectra_per_heap = config.spectra_per_heap;
+    std::int64_t ticks_between_spectra = config.ticks_between_spectra;
 
     hdf5_writer w(config.filename, config.direct,
                   channels, channels_per_heap, spectra_per_heap, ticks_between_spectra);
@@ -1509,7 +1361,6 @@ PYBIND11_PLUGIN(_bf_ingest_session)
         .def_readwrite("channels", &session_config::channels)
         .def_readwrite("spectra_per_heap", &session_config::spectra_per_heap)
         .def_readwrite("channels_per_heap", &session_config::channels_per_heap)
-        .def_readwrite("spead_metadata", &session_config::spead_metadata)
         .def("add_endpoint", &session_config::add_endpoint, "bind_host"_a, "port"_a);
     ;
     py::class_<session>(m, "Session", "Capture session")

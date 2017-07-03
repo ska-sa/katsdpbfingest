@@ -27,6 +27,43 @@ import concurrent.futures
 _logger = logging.getLogger(__name__)
 
 
+def _config_from_telstate(args, config, attr_name, telstate_name, use_stream_name=True):
+    if use_stream_name:
+        normalised = args.stream_name.replace('.', '_').replace('-', '_')
+        telstate_name = '{}_{}'.format(normalised, telstate_name)
+    value = args.telstate['cbf_' + telstate_name]
+    _logger.info('Setting %s to %s from telstate', attr_name, value)
+    setattr(config, attr_name, value)
+
+def _create_session_config(args):
+    """Creates a SessionConfig object for a :class:`CaptureServer`.
+
+    Note that this function makes blocking calls to telstate. The returned
+    config has a blank filename.
+
+    Parameters
+    ----------
+    args : :class:`argparse.Namespace`
+        Command-line arguments. See :class:`CaptureServer`.
+    """
+    config = SessionConfig('')  # Real filename supplied later
+    for endpoint in args.cbf_spead:
+        config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
+    if args.interface is not None:
+        config.interface_address = katsdpservices.get_interface_address(args.interface)
+    config.ibv = args.ibv
+    if args.affinity:
+        config.disk_affinity = args.affinity[0]
+        config.network_affinity = args.affinity[1]
+    if args.direct_io:
+        config.direct = True
+    _config_from_telstate(args, config, 'ticks_between_spectra', 'ticks_between_spectra', False)
+    _config_from_telstate(args, config, 'channels', 'n_chans')
+    _config_from_telstate(args, config, 'channels_per_heap', 'n_chans_per_substream')
+    _config_from_telstate(args, config, 'spectra_per_heap', 'spectra_per_heap')
+    return config
+
+
 class _CaptureSession(object):
     """Object encapsulating a co-routine that runs for a single capture session
     (from ``capture-init`` to end of stream or ``capture-done``.
@@ -60,51 +97,6 @@ class _CaptureSession(object):
         self._session = Session(config)
         self._run_future = trollius.async(self._run(), loop=self._loop)
 
-    @classmethod
-    def _config_from_telstate(cls, args, config, attr_name, telstate_name, use_stream_name=True):
-        if use_stream_name:
-            normalised = args.stream_name.replace('.', '_').replace('-', '_')
-            telstate_name = '{}_{}'.format(normalised, telstate_name)
-        value = args.telstate.get('cbf_' + telstate_name)
-        if value is not None:
-            _logger.info('Setting %s to %s from telstate', attr_name, value)
-            setattr(config, attr_name, value)
-
-    @classmethod
-    def create_session_config(cls, args):
-        """Creates a SessionConfig object for a :class:`_CaptureSession`.
-
-        Note that this function may block for a long time. When used with
-        trollius, it should be run in a separate executor.
-
-        Parameters
-        ----------
-        args : :class:`argparse.Namespace`
-            Command-line arguments. See :class:`CaptureServer`.
-        """
-        config = SessionConfig(os.path.join(args.file_base, '{}.h5'.format(int(time.time()))))
-        for endpoint in args.cbf_spead:
-            config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
-        if args.interface is not None:
-            config.interface_address = katsdpservices.get_interface_address(args.interface)
-        config.ibv = args.ibv
-        if args.affinity:
-            config.disk_affinity = args.affinity[0]
-            config.network_affinity = args.affinity[1]
-        if args.direct_io:
-            config.direct = True
-        config.spead_metadata = args.spead_metadata
-        if args.telstate is not None and args.stream_name is not None:
-            _logger.info('Waiting for cam2telstate to be ready')
-            args.telstate.wait_key('sdp_cam2telstate_status', lambda value: value == 'ready')
-            _logger.info('cam2telstate is ready')
-            cls._config_from_telstate(
-                args, config, 'ticks_between_spectra', 'ticks_between_spectra', False)
-            cls._config_from_telstate(args, config, 'channels', 'n_chans')
-            cls._config_from_telstate(args, config, 'channels_per_heap', 'n_chans_per_substream')
-            cls._config_from_telstate(args, config, 'spectra_per_heap', 'spectra_per_heap')
-        return config
-
     def _write_metadata(self):
         telstate = self._telstate
         try:
@@ -129,8 +121,7 @@ class _CaptureSession(object):
             yield From(self._loop.run_in_executor(pool, self._session.join))
             if self._session.n_heaps > 0:
                 # Write the metadata to file
-                if self._telstate is not None:
-                    self._write_metadata()
+                self._write_metadata()
             _logger.info('Capture complete, %d heaps, of which %d dropped',
                          self._session.n_total_heaps,
                          self._session.n_total_heaps - self._session.n_heaps)
@@ -144,6 +135,7 @@ class _CaptureSession(object):
         """
         self._session.stop_stream()
         yield From(self._run_future)
+
 
 class CaptureServer(object):
     """Beamformer capture. This contains all the core functionality of the
@@ -160,7 +152,8 @@ class CaptureServer(object):
         - file_base
         - buffer
         - affinity
-        - spead_metadata
+        - telstate
+        - stream_name
 
     loop : :class:`trollius.BaseEventLoop`
         IO Loop for running coroutines
@@ -177,11 +170,14 @@ class CaptureServer(object):
         IO Loop passed to constructor
     _capture : :class:`_CaptureSession`
         Current capture session, or ``None`` if not capturing
+    _config : :class:`katsdpingest.bf_ingest_session.SessionConfig`
+        Configuration, with the filename to be filled in on capture-init
     """
     def __init__(self, args, loop):
         self._args = args
         self._loop = loop
         self._capture = None
+        self._config = _create_session_config(args)
 
     @property
     def capturing(self):
@@ -193,10 +189,10 @@ class CaptureServer(object):
 
         This is a co-routine.
         """
-        config = yield From(self._loop.run_in_executor(
-            None, _CaptureSession.create_session_config, self._args))
         if self._capture is None:
-            self._capture = _CaptureSession(config, self._args.telstate, self._loop)
+            basename = '{}.h5'.format(int(time.time()))
+            self._config.filename = os.path.join(self._args.file_base, basename)
+            self._capture = _CaptureSession(self._config, self._args.telstate, self._loop)
         raise Return(self._capture.filename)
 
     @trollius.coroutine
