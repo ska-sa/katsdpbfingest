@@ -17,6 +17,7 @@ import tornado
 import logging
 import katsdpingest
 import katsdpservices
+import katsdpservices.asyncio
 import psutil
 import ipaddress
 import socket
@@ -242,7 +243,7 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
     def _start_capture(self):
         """Tornado variant of :meth:`start_capture`"""
         start_future = trollius.async(self.start_capture(), loop=self._loop)
-        yield tornado.platform.asyncio.to_tornado_future(start_future)
+        yield katsdpservices.asyncio.to_tornado_future(start_future)
 
     @request()
     @return_reply()
@@ -262,7 +263,7 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
     def _stop_capture(self):
         """Tornado variant of :meth:`stop_capture`"""
         stop_future = trollius.async(self.stop_capture(), loop=self._loop)
-        yield tornado.platform.asyncio.to_tornado_future(stop_future)
+        yield katsdpservices.asyncio.to_tornado_future(stop_future)
 
     @request()
     @return_reply()
