@@ -120,5 +120,9 @@ class Range(object):
         """Return a slice object representing the same range"""
         return slice(self.start, self.stop)
 
+    def astuple(self):
+        """Return a tuple containing the start and end values"""
+        return (self.start, self.stop)
+
 
 __all__ = ['set_telstate_entry', 'Range']
