@@ -124,5 +124,22 @@ class Range(object):
         """Return a tuple containing the start and end values"""
         return (self.start, self.stop)
 
+    def split(self, chunks, chunk_id):
+        """Return the `chunk_id`-th of `chunks` equally-sized pieces.
+
+        Raises
+        ------
+        ValueError
+            if chunk_id is not in the range [0, chunks) or the range does not
+            divide evenly.
+        """
+        if not 0 <= chunk_id < chunks:
+            raise ValueError('chunk_id is out of range')
+        if len(self) % chunks != 0:
+            raise ValueError('range {} does not divide into {} chunks'.format(self, chunks))
+        chunk_size = len(self) // chunks
+        return Range(self.start + chunk_id * chunk_size,
+                     self.start + (chunk_id + 1) * chunk_size)
+
 
 __all__ = ['set_telstate_entry', 'Range']
