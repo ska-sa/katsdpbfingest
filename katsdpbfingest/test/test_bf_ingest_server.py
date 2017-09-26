@@ -20,13 +20,6 @@ import spead2.send
 import socket
 
 
-class DummyTelescopeState(dict):
-    def wait_key(self, key, condition=None, timeout=None):
-        assert key in self
-        if condition:
-            assert condition(self[key])
-
-
 class TestSession(object):
     def setup(self):
         # To avoid collisions when running tests in parallel on a single host,
@@ -76,12 +69,12 @@ class TestCaptureServer(object):
             stream_name='corr.beam_0x',
             affinity=None,
             interface=None,
-            telstate=DummyTelescopeState({
+            telstate={
                 'cbf_corr_beam_0x_n_chans': self.n_channels,
                 'cbf_corr_beam_0x_n_chans_per_substream': self.channels_per_heap,
                 'cbf_corr_beam_0x_spectra_per_heap': self.spectra_per_heap,
                 'cbf_ticks_between_spectra': self.ticks_between_spectra,
-            }))
+            })
         self.loop = trollius.get_event_loop()
 
     def teardown(self):
