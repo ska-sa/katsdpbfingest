@@ -58,7 +58,7 @@
 
 namespace py = pybind11;
 
-static constexpr int ALIGNMENT = 4096;
+static constexpr int ALIGNMENT = 4096;   // For O_DIRECT file access
 static spead2::log_function_python logger;
 
 /**
@@ -111,7 +111,7 @@ static aligned_ptr<T> make_aligned(std::size_t elements)
 
 /**
  * Return a vector that can be passed to a @c spead2::thread_pool constructor
- * to bind to core @a affinity is non-negative.
+ * to bind to core @a affinity, or to no core if it is negative.
  */
 std::vector<int> affinity_vector(int affinity)
 {
@@ -591,9 +591,13 @@ struct session_config
     int disk_affinity = -1;
     bool direct = false;
 
+    // First channel
+    int channel_offset = 0;
+    // Number of channels, counting from channel_offset
+    int channels = -1;
+
     // Metadata derived from telescope state.
     std::int64_t ticks_between_spectra = -1;
-    int channels = -1;
     int spectra_per_heap = -1;
     int channels_per_heap = -1;
 
@@ -698,6 +702,7 @@ private:
     const int spectra_per_heap;
     const int channels_per_heap;
     const std::size_t payload_size;
+    const int channel_offset;
 
     // Hard-coded item IDs
     static constexpr int bf_raw_id = 0x5000;
@@ -923,13 +928,14 @@ bool receiver::parse_timestamp_channel(
                    channel, channels_per_heap);
         return false;
     }
-    if (channel < 0 || channel >= channels)
+    if (channel < channel_offset || channel >= channels + channel_offset)
     {
-        log_format(spead2::log_level::warning, "frequency %1% is outside of range [0, %2%), discarding",
-                   channel, channels);
+        log_format(spead2::log_level::warning, "frequency %1% is outside of range [%2%, %3%), discarding",
+                   channel, channel_offset, channels + channel_offset);
         return false;
     }
 
+    channel -= channel_offset;
     spectrum = rel / ticks_between_spectra;
     heap_offset = 2 * channel * spectra_per_heap;
     present_idx = channel / channels_per_heap;
@@ -1104,8 +1110,9 @@ void receiver::stop()
 receiver::receiver(const session_config &config)
     : window<slice, receiver>(window_size),
     config(config),
-    ticks_between_spectra(config.ticks_between_spectra),
+    channel_offset(config.channel_offset),
     channels(config.channels),
+    ticks_between_spectra(config.ticks_between_spectra),
     spectra_per_heap(config.spectra_per_heap),
     channels_per_heap(config.channels_per_heap),
     payload_size(2 * spectra_per_heap * channels_per_heap),
@@ -1361,6 +1368,7 @@ PYBIND11_PLUGIN(_bf_ingest_session)
         .def_readwrite("channels", &session_config::channels)
         .def_readwrite("spectra_per_heap", &session_config::spectra_per_heap)
         .def_readwrite("channels_per_heap", &session_config::channels_per_heap)
+        .def_readwrite("channel_offset", &session_config::channel_offset)
         .def("add_endpoint", &session_config::add_endpoint, "bind_host"_a, "port"_a);
     ;
     py::class_<session>(m, "Session", "Capture session")

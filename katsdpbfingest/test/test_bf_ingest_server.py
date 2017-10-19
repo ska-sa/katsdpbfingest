@@ -2,22 +2,30 @@
 
 from __future__ import print_function, division, absolute_import
 import argparse
-import h5py
 import tempfile
 import shutil
 import os.path
 import time
 import contextlib
+import socket
+
+import h5py
 import numpy as np
-from katsdpingest import bf_ingest_server, _bf_ingest_session
-from nose.tools import *
-from katsdptelstate import endpoint
+
 import trollius
 from trollius import From
+
 import spead2
 import spead2.recv.trollius
 import spead2.send
-import socket
+
+from nose.tools import assert_equal, assert_true, assert_false
+
+import katsdptelstate
+from katsdptelstate import endpoint
+
+from katsdpingest import bf_ingest_server, _bf_ingest_session
+from ..utils import Range
 
 
 class TestSession(object):
@@ -43,7 +51,7 @@ class TestSession(object):
         config.channels_per_heap = 256
         config.spectra_per_heap = 256
         config.ticks_between_spectra = 8192
-        session = _bf_ingest_session.Session(config)
+        _bf_ingest_session.Session(config)
 
 
 class TestCaptureServer(object):
@@ -56,30 +64,40 @@ class TestCaptureServer(object):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.bind(('127.0.0.1', 0))
         self.port = self._sock.getsockname()[1]
-        self.n_channels = 768
+        self.n_channels = 1024
         self.spectra_per_heap = 256
-        self.n_bengs = 8
+        self.endpoints = endpoint.endpoint_list_parser(self.port)(
+            '239.102.2.0+7:{}'.format(self.port))
+        self.n_bengs = 16
         self.ticks_between_spectra = 8192
         self.channels_per_heap = self.n_channels // self.n_bengs
+        attrs = {
+            'cbf_corr_beam_0x_n_chans': self.n_channels,
+            'cbf_corr_beam_0x_n_chans_per_substream': self.channels_per_heap,
+            'cbf_corr_beam_0x_spectra_per_heap': self.spectra_per_heap,
+            'cbf_ticks_between_spectra': self.ticks_between_spectra,
+            'cbf_sync_time': 123456789.0,
+            'cbf_scale_factor_timestamp': 1712000000.0
+        }
+        telstate = katsdptelstate.TelescopeState()
+        for key, value in attrs.items():
+            telstate.add(key, value, immutable=True)
         self.args = argparse.Namespace(
-            cbf_spead=[endpoint.Endpoint('239.1.2.3', self.port)],
+            cbf_spead=self.endpoints,
+            channels=Range(128, 768),
             file_base=self.tmpdir,
             direct_io=False,
             ibv=False,
             stream_name='corr.beam_0x',
             affinity=None,
-            interface=None,
-            telstate={
-                'cbf_corr_beam_0x_n_chans': self.n_channels,
-                'cbf_corr_beam_0x_n_chans_per_substream': self.channels_per_heap,
-                'cbf_corr_beam_0x_spectra_per_heap': self.spectra_per_heap,
-                'cbf_ticks_between_spectra': self.ticks_between_spectra,
-            })
+            interface='lo',
+            telstate=telstate)
         self.loop = trollius.get_event_loop()
 
     def teardown(self):
         shutil.rmtree(self.tmpdir)
         self._sock.close()
+        self.args.telstate.clear()
 
     @trollius.coroutine
     def _test_manual_stop_no_data(self):
@@ -112,7 +130,6 @@ class TestCaptureServer(object):
         # Send it a SPEAD stream
         config = spead2.send.StreamConfig(max_packet_size=4196, rate=1e9 / 8)
         flavour = spead2.Flavour(4, 64, 48, 0)
-        stream = spead2.send.UdpStream(spead2.ThreadPool(), '239.1.2.3', self.port, config)
         ig = spead2.send.ItemGroup(flavour=flavour)
         ig.add_item(name='timestamp', id=0x1600,
                     description='Timestamp', shape=(), format=[('u', 48)])
@@ -122,8 +139,12 @@ class TestCaptureServer(object):
         ig.add_item(name='bf_raw',  id=0x5000,
                     description='Beamformer data',
                     shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
-        stream.send_heap(ig.get_heap())
-        stream.send_heap(ig.get_start())
+        streams = [spead2.send.UdpStream(
+            spead2.ThreadPool(), ep.host, self.port, config, ttl=1, interface_address='127.0.0.1')
+            for ep in self.endpoints]
+        for stream in streams:
+            stream.send_heap(ig.get_heap(descriptors='all'))
+            stream.send_heap(ig.get_start())
         ts = 1234567890
         for i in range(n_heaps):
             data = np.zeros((self.n_channels, self.spectra_per_heap, 2), np.int8)
@@ -137,11 +158,12 @@ class TestCaptureServer(object):
                 ig['bf_raw'].value = data[j * self.channels_per_heap
                                           : (j + 1) * self.channels_per_heap, ...]
                 if not drop[j, i]:
-                    stream.send_heap(ig.get_heap())
+                    streams[j // (self.n_bengs // len(self.endpoints))].send_heap(ig.get_heap())
             ts += self.spectra_per_heap * self.ticks_between_spectra
         if end:
-            stream.send_heap(ig.get_end())
-        stream = None
+            for stream in streams:
+                stream.send_heap(ig.get_end())
+        streams = []
 
         # Wait for stream to shut down on its own
         yield From(trollius.sleep(0.1))
@@ -164,6 +186,7 @@ class TestCaptureServer(object):
                         spectrum0 = j * self.spectra_per_heap
                         expected[channel0 : channel0 + self.channels_per_heap,
                                  spectrum0 : spectrum0 + self.spectra_per_heap, :] = 0
+            expected = expected[self.args.channels.asslice()]
             np.testing.assert_equal(expected, bf_raw)
 
             timestamps = h5file['/Data/timestamps']
@@ -175,13 +198,19 @@ class TestCaptureServer(object):
             slice_drops = np.sum(drop, axis=0)
             captured_slices = np.nonzero(slice_drops == 0)[0]
             captured_spectra = captured_slices[:, np.newaxis] * self.spectra_per_heap + \
-                    np.arange(self.spectra_per_heap)[np.newaxis, :]
+                np.arange(self.spectra_per_heap)[np.newaxis, :]
             expected = 1234567890 + self.ticks_between_spectra * captured_spectra.flatten()
             np.testing.assert_equal(expected, captured_timestamps)
 
             flags = h5file['/Data/flags']
             expected = np.where(drop, 8, 0).astype(np.uint8)
+            expected = expected[self.args.channels.start // self.channels_per_heap :
+                                self.args.channels.stop // self.channels_per_heap]
             np.testing.assert_equal(expected, flags)
+
+            data = h5file['/Data']
+            assert_equal('corr.beam_0x', data.attrs['stream_name'])
+            assert_equal(self.args.channels.start, data.attrs['channel_offset'])
 
     def test_stream_end(self):
         """Stream ends with an end-of-stream"""

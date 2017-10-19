@@ -14,6 +14,7 @@ import katsdptelstate.endpoint
 import spead2
 import katsdpservices
 from katsdpingest.bf_ingest_server import KatcpCaptureServer
+from katsdpingest.utils import Range
 
 
 @trollius.coroutine
@@ -32,6 +33,7 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), default=':7148', help='endpoints to listen for CBF SPEAD stream (including multicast IPs). [<ip>[+<count>]][:port].', metavar='ENDPOINTS')
     parser.add_argument('--stream-name', type=str, metavar='NAME', help='Stream name for metadata in telstate')
+    parser.add_argument('--channels', type=Range.parse, metavar='A:B', help='Output channels')
     parser.add_argument('--log-level', '-l', type=str, metavar='LEVEL', default=None, help='log level')
     parser.add_argument('--file-base', default='.', type=str, help='base directory into which to write HDF5 files', metavar='DIR')
     parser.add_argument('--affinity', type=spead2.parse_range_list, help='List of CPUs to which to bind threads', metavar='CPU,CPU')

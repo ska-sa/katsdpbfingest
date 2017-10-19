@@ -34,6 +34,19 @@ class Range(object):
         self.start = start
         self.stop = stop
 
+    @classmethod
+    def parse(cls, value):
+        """Convert a string of the form 'A:B' to a :class:`~katsdpingest.utils.Range`,
+        where A and B are integers.
+
+        This is suitable as an argparse type converter.
+        """
+        fields = value.split(':', 1)
+        if len(fields) != 2:
+            raise ValueError('Invalid range format {}'.format(value))
+        else:
+            return Range(int(fields[0]), int(fields[1]))
+
     def __str__(self):
         return '{}:{}'.format(self.start, self.stop)
 
