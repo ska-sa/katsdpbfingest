@@ -1,40 +1,58 @@
 from __future__ import print_function, division, absolute_import
+import time
+import os
+import os.path
+import logging
+import socket
+import contextlib
+
+import ipaddress
+import concurrent.futures
+import psutil
+
+import h5py
+import numpy as np
+
+import trollius
+from trollius import From, Return
+import tornado
+
 import spead2
 import spead2.recv
 import spead2.recv.trollius
 import katcp
 from katcp.kattypes import request, return_reply
+
 from katsdpfilewriter import telescope_model, ar1_model, file_writer
-from ._bf_ingest_session import Session, SessionConfig
-import h5py
-import numpy as np
-import time
-import os
-import os.path
-import trollius
-from trollius import From, Return
-import tornado
-import logging
 import katsdpingest
 import katsdpservices
 import katsdpservices.asyncio
-import psutil
-import ipaddress
-import socket
-import contextlib
-import concurrent.futures
+
+from ._bf_ingest_session import Session, SessionConfig
+from . import utils
 
 
 _logger = logging.getLogger(__name__)
 
 
-def _config_from_telstate(args, config, attr_name, telstate_name, use_stream_name=True):
-    if use_stream_name:
-        normalised = args.stream_name.replace('.', '_').replace('-', '_')
-        telstate_name = '{}_{}'.format(normalised, telstate_name)
-    value = args.telstate['cbf_' + telstate_name]
-    _logger.info('Setting %s to %s from telstate', attr_name, value)
-    setattr(config, attr_name, value)
+def _config_from_telstate(args, config, name_map):
+    """Populate a SessionConfig from telstate entries.
+
+    Parameters
+    ----------
+    args : :class:`argparse.Namespace`
+        Command-line arguments
+    config : :class:`katsdpingest._bf_ingest_session.SessionConfig`
+        Configuration object to populate
+    name_map : dict
+        Mapping from attribute name in config to telstate name suffix
+    """
+    prefixes = utils.cbf_telstate_prefixes(args.telstate, args.stream_name)
+    for attr_name, telstate_name in name_map.items():
+        value = utils.get_telstate_entry(args.telstate, prefixes, telstate_name)
+        _logger.info('Setting %s to %s from telstate', attr_name, value)
+        setattr(config, attr_name, value)
+
 
 def _create_session_config(args):
     """Creates a SessionConfig object for a :class:`CaptureServer`.
@@ -58,10 +76,11 @@ def _create_session_config(args):
         config.network_affinity = args.affinity[1]
     if args.direct_io:
         config.direct = True
-    _config_from_telstate(args, config, 'ticks_between_spectra', 'ticks_between_spectra', False)
-    _config_from_telstate(args, config, 'channels', 'n_chans')
-    _config_from_telstate(args, config, 'channels_per_heap', 'n_chans_per_substream')
-    _config_from_telstate(args, config, 'spectra_per_heap', 'spectra_per_heap')
+    _config_from_telstate(args, config, {
+        'ticks_between_spectra': 'ticks_between_spectra',
+        'channels': 'n_chans',
+        'channels_per_heap': 'n_chans_per_substream',
+        'spectra_per_heap': 'spectra_per_heap'})
     return config
 
 
