@@ -132,7 +132,7 @@ class _CaptureSession(object):
         h5file = h5py.File(self.filename, 'r+')
         with contextlib.closing(h5file):
             file_writer.set_telescope_model(h5file, model_data)
-            file_writer.set_telescope_state(h5file, telstate)
+            file_writer.set_telescope_state(h5file, telstate, start_timestamp=first_timestamp)
 
     @trollius.coroutine
     def _run(self):
