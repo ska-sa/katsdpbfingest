@@ -5,6 +5,7 @@ import os.path
 import logging
 import socket
 import contextlib
+import time
 
 import ipaddress
 import concurrent.futures
@@ -111,6 +112,7 @@ class _CaptureSession(object):
         Task for the coroutine that waits for the C++ code and finalises
     """
     def __init__(self, config, telstate, loop):
+        self._start_time = time.time()
         self._loop = loop
         self._telstate = telstate
         self.filename = config.filename
@@ -126,13 +128,15 @@ class _CaptureSession(object):
         except KeyError:
             _logger.warn('Failed to get timestamp conversion items, so skipping metadata')
             return
+        # self._start_time should always be earlier, except when a clock is wrong.
+        start_time = min(first_timestamp, self._start_time)
         antenna_mask = telstate.get('config', {}).get('antenna_mask', '').split(',')
         model = ar1_model.create_model(antenna_mask)
-        model_data = telescope_model.TelstateModelData(model, telstate, first_timestamp)
+        model_data = telescope_model.TelstateModelData(model, telstate, start_time)
         h5file = h5py.File(self.filename, 'r+')
         with contextlib.closing(h5file):
             file_writer.set_telescope_model(h5file, model_data)
-            file_writer.set_telescope_state(h5file, telstate, start_timestamp=first_timestamp)
+            file_writer.set_telescope_state(h5file, telstate, start_timestamp=start_time)
 
     @trollius.coroutine
     def _run(self):
