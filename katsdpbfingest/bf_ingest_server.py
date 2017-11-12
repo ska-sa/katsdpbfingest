@@ -5,6 +5,7 @@ import os.path
 import logging
 import socket
 import contextlib
+import time
 
 import concurrent.futures
 
@@ -23,6 +24,7 @@ import katsdpservices
 import katsdpservices.asyncio
 
 from ._bf_ingest_session import Session, SessionConfig
+from . import utils
 from .utils import Range
 import katsdpingest
 
@@ -30,13 +32,24 @@ import katsdpingest
 _logger = logging.getLogger(__name__)
 
 
-def _config_from_telstate(args, config, attr_name, telstate_name, use_stream_name=True):
-    if use_stream_name:
-        normalised = args.stream_name.replace('.', '_').replace('-', '_')
-        telstate_name = '{}_{}'.format(normalised, telstate_name)
-    value = args.telstate['cbf_' + telstate_name]
-    _logger.info('Setting %s to %s from telstate', attr_name, value)
-    setattr(config, attr_name, value)
+def _config_from_telstate(args, config, name_map):
+    """Populate a SessionConfig from telstate entries.
+
+    Parameters
+    ----------
+    args : :class:`argparse.Namespace`
+        Command-line arguments
+    config : :class:`katsdpingest._bf_ingest_session.SessionConfig`
+        Configuration object to populate
+    name_map : dict
+        Mapping from attribute name in config to telstate name suffix
+    """
+    prefixes = utils.cbf_telstate_prefixes(args.telstate, args.stream_name)
+    for attr_name, telstate_name in name_map.items():
+        value = utils.get_telstate_entry(args.telstate, prefixes, telstate_name)
+        _logger.info('Setting %s to %s from telstate', attr_name, value)
+        setattr(config, attr_name, value)
+
 
 
 def _create_session_config(args):
@@ -59,10 +72,11 @@ def _create_session_config(args):
         config.network_affinity = args.affinity[1]
     if args.direct_io:
         config.direct = True
-    _config_from_telstate(args, config, 'ticks_between_spectra', 'ticks_between_spectra', False)
-    _config_from_telstate(args, config, 'channels', 'n_chans')
-    _config_from_telstate(args, config, 'channels_per_heap', 'n_chans_per_substream')
-    _config_from_telstate(args, config, 'spectra_per_heap', 'spectra_per_heap')
+    _config_from_telstate(args, config, {
+        'ticks_between_spectra': 'ticks_between_spectra',
+        'channels': 'n_chans',
+        'channels_per_heap': 'n_chans_per_substream',
+        'spectra_per_heap': 'spectra_per_heap'})
     # Check that the requested channel range is valid.
     all_channels = Range(0, config.channels)
     if args.channels is None:
@@ -114,6 +128,7 @@ class _CaptureSession(object):
         Task for the coroutine that waits for the C++ code and finalises
     """
     def __init__(self, config, telstate, stream_name, loop):
+        self._start_time = time.time()
         self._loop = loop
         self._telstate = telstate
         self.filename = config.filename
@@ -131,13 +146,15 @@ class _CaptureSession(object):
         except KeyError:
             _logger.warn('Failed to get timestamp conversion items, so skipping metadata')
             return
+        # self._start_time should always be earlier, except when a clock is wrong.
+        start_time = min(first_timestamp, self._start_time)
         antenna_mask = telstate.get('config', {}).get('antenna_mask', '').split(',')
         model = ar1_model.create_model(antenna_mask)
-        model_data = telescope_model.TelstateModelData(model, telstate, first_timestamp)
+        model_data = telescope_model.TelstateModelData(model, telstate, start_time)
         h5file = h5py.File(self.filename, 'r+')
         with contextlib.closing(h5file):
             file_writer.set_telescope_model(h5file, model_data)
-            file_writer.set_telescope_state(h5file, telstate)
+            file_writer.set_telescope_state(h5file, telstate, start_timestamp=start_time)
             if self.stream_name is not None:
                 data_group = h5file['/Data']
                 data_group.attrs['stream_name'] = self.stream_name
