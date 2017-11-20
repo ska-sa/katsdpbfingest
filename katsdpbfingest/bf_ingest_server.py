@@ -17,7 +17,7 @@ from trollius import From, Return
 import tornado
 
 import katcp
-from katcp.kattypes import request, return_reply
+from katcp.kattypes import request, return_reply, Str
 
 from katsdpfilewriter import telescope_model, ar1_model, file_writer
 import katsdpservices
@@ -287,10 +287,10 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
         start_future = trollius.async(self.start_capture(), loop=self._loop)
         yield katsdpservices.asyncio.to_tornado_future(start_future)
 
-    @request()
+    @request(Str(optional=True))
     @return_reply()
     @tornado.gen.coroutine
-    def request_capture_init(self, sock):
+    def request_capture_init(self, sock, program_block_id=None):
         """Start capture to file."""
         if self.capturing:
             raise tornado.gen.Return(('fail', 'already capturing'))
