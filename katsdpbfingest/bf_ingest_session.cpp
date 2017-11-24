@@ -694,7 +694,7 @@ private:
     bool use_ibv = false;
 
     /// Depth of window
-    static constexpr std::size_t window_size = 2;
+    static constexpr std::size_t window_size = 64;
 
     // Metadata copied from or computed from the session_config
     const std::int64_t ticks_between_spectra;
