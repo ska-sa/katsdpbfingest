@@ -44,9 +44,9 @@ def _config_from_telstate(args, config, name_map):
     name_map : dict
         Mapping from attribute name in config to telstate name suffix
     """
-    prefixes = utils.cbf_telstate_prefixes(args.telstate, args.stream_name)
+    telstate = utils.cbf_telstate_view(args.telstate, args.stream_name)
     for attr_name, telstate_name in name_map.items():
-        value = utils.get_telstate_entry(args.telstate, prefixes, telstate_name)
+        value = telstate[telstate_name]
         _logger.info('Setting %s to %s from telstate', attr_name, value)
         setattr(config, attr_name, value)
 
@@ -139,9 +139,10 @@ class _CaptureSession(object):
 
     def _write_metadata(self):
         telstate = self._telstate
+        view = utils.cbf_telstate_view(telstate, self.stream_name)
         try:
-            sync_time = telstate['cbf_sync_time']
-            scale_factor_timestamp = telstate['cbf_scale_factor_timestamp']
+            sync_time = view['sync_time']
+            scale_factor_timestamp = view['scale_factor_timestamp']
             first_timestamp = sync_time + self._session.first_timestamp / scale_factor_timestamp
         except KeyError:
             _logger.warn('Failed to get timestamp conversion items, so skipping metadata')

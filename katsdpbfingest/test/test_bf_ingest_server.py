@@ -72,12 +72,15 @@ class TestCaptureServer(object):
         self.ticks_between_spectra = 8192
         self.channels_per_heap = self.n_channels // self.n_bengs
         attrs = {
-            'cbf_corr_beam_0x_n_chans': self.n_channels,
-            'cbf_corr_beam_0x_n_chans_per_substream': self.channels_per_heap,
-            'cbf_corr_beam_0x_spectra_per_heap': self.spectra_per_heap,
-            'cbf_ticks_between_spectra': self.ticks_between_spectra,
-            'cbf_sync_time': 123456789.0,
-            'cbf_scale_factor_timestamp': 1712000000.0
+            'i0_tied_array_channelised_voltage_0x_n_chans': self.n_channels,
+            'i0_tied_array_channelised_voltage_0x_n_chans_per_substream': self.channels_per_heap,
+            'i0_tied_array_channelised_voltage_0x_spectra_per_heap': self.spectra_per_heap,
+            'i0_tied_array_channelised_voltage_0x_src_streams': [
+                'i0_antenna_channelised_voltage'],
+            'i0_antenna_channelised_voltage_ticks_between_spectra': self.ticks_between_spectra,
+            'i0_antenna_channelised_voltage_instrument_dev_name': 'i0',
+            'i0_sync_time': 123456789.0,
+            'i0_scale_factor_timestamp': 1712000000.0
         }
         telstate = katsdptelstate.TelescopeState()
         for key, value in attrs.items():
@@ -88,7 +91,7 @@ class TestCaptureServer(object):
             file_base=self.tmpdir,
             direct_io=False,
             ibv=False,
-            stream_name='corr.beam_0x',
+            stream_name='i0_tied_array_channelised_voltage_0x',
             affinity=None,
             interface='lo',
             telstate=telstate)
@@ -209,7 +212,7 @@ class TestCaptureServer(object):
             np.testing.assert_equal(expected, flags)
 
             data = h5file['/Data']
-            assert_equal('corr.beam_0x', data.attrs['stream_name'])
+            assert_equal('i0_tied_array_channelised_voltage_0x', data.attrs['stream_name'])
             assert_equal(self.args.channels.start, data.attrs['channel_offset'])
 
     def test_stream_end(self):

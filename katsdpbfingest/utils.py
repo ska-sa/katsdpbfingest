@@ -7,72 +7,38 @@ import katsdptelstate
 _logger = logging.getLogger(__name__)
 
 
-def cbf_telstate_prefixes(telstate, stream_name):
-    """Find all prefixes that should be consulted in telstate to learn
-    information about a stream. It supports only baseline-correlation-products
-    and tied-array-channelised-voltage streams.
-
-    It supports older versions of cam2telstate that strips the stream
-    names out of most sensors as a fallback.
+def cbf_telstate_view(telstate, stream_name):
+    """Create a telstate view that allows querying properties from a stream.
+    It supports only baseline-correlation-products and
+    tied-array-channelised-voltage streams. Properties that don't exist on the
+    stream are searched on the upstream antenna-channelised-voltage stream, and
+    then the instrument of that stream.
 
     Returns
     -------
-    prefixes : list of str
-        Prefixes to prepend to telstate lookups (without a trailing
-        underscore). They should be consulted in order, using the first one
-        that matches.
+    view : :class:`katsdptelstate.TelescopeState`
+        Telstate view that allows stream properties to be searched
     """
     prefixes = []
-    if stream_name is not None:
-        stream_name = stream_name.replace('.', '_').replace('-', '_')
-        prefixes.append('cbf_' + stream_name)
-        # Generate a list of places to look for attributes:
-        # - the stream itself
-        # - if known, the upstream antenna-channelised-voltage stream, and its instrument
-        # - if all else fails, the base cbf_ prefix (for backwards compatibility)
-        try:
-            # antenna-channelised-voltage stream
-            src = telstate['cbf_' + stream_name + '_src_streams'][0]
-            prefixes.append('cbf_' + src)
-            instrument = telstate['cbf_' + src + '_instrument_dev_name']
-            prefixes.append('cbf_' + instrument)
-        except KeyError, IndexError:
-            _logger.warning('Could not find upstream sources of %s', stream_name)
-            pass
-    prefixes.append('cbf')
-    return prefixes
+    stream_name = stream_name.replace('.', '_').replace('-', '_')
+    prefixes.append(stream_name)
+    # Generate a list of places to look for attributes:
+    # - the stream itself
+    # - the upstream antenna-channelised-voltage stream, and its instrument
+    src = telstate.view(stream_name, exclusive=True)['src_streams'][0]
+    prefixes.append(src)
+    instrument = telstate.view(src, exclusive=True)['instrument_dev_name']
+    prefixes.append(instrument)
+    prefixes = [prefix + telstate.SEPARATOR for prefix in prefixes]
+    return telstate.__class__(prefixes=prefixes, base=telstate)
 
 
-def get_telstate_entry(telstate, prefixes, key):
-    """Fetch an attribute from telstate.
-
-    Multiple version of the name are consulted, and the first one found wins.
-
-    Raises
-    ------
-    KeyError
-        if the key is not found with any of the prefixes
-    """
-    for prefix in prefixes:
-        try:
-            telstate_name = '{}_{}'.format(prefix, key)
-            return telstate[telstate_name]
-        except KeyError:
-            pass
-    # We didn't find a match on any prefix
-    raise KeyError('attribute {} not found in telstate with any prefix'.format(key))
-
-
-def set_telstate_entry(telstate, name, value, prefix=None, attribute=True):
+def set_telstate_entry(telstate, name, value, attribute=True):
     if telstate is not None:
-        if prefix is not None:
-            name = '{0}_{1}'.format(prefix, name)
         try:
             telstate.add(name, value, immutable=attribute)
-        except katsdptelstate.ImmutableKeyError:
-            old = telstate.get(name)
-            _logger.warning('Attribute %s could not be set to %s because it is already set to %s',
-                            name, value, old)
+        except katsdptelstate.ImmutableKeyError as error:
+            _logger.warning('%s', error)
 
 
 class Range(object):
