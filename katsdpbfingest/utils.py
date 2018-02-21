@@ -1,7 +1,9 @@
 """Miscellaneous ingest utilities"""
 
 import logging
+
 import katsdptelstate
+import katcp
 
 
 _logger = logging.getLogger(__name__)
@@ -177,4 +179,34 @@ class Range(object):
                      self.start + (chunk_id + 1) * chunk_size)
 
 
-__all__ = ['set_telstate_entry', 'Range']
+class SensorWrapper(object):
+    """Convenience wrapper around a sensor.
+
+    It
+    - Provides property access to the value
+    - Caches the value of the sensor (removes the need for locking)
+    - Filters out updates that don't change the value
+    - Allows the status to be computed from the value
+
+    Because of the caching, it is important that the sensor is not modified
+    other than through the wrapper.
+    """
+    def __init__(self, sensor, initial_value=None, status_func=lambda x: katcp.Sensor.NOMINAL):
+        self._sensor = sensor
+        self._value = sensor.value()
+        self._status_func = status_func
+        if initial_value is not None:
+            self.value = initial_value
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, new_value):
+        if new_value != self._value:
+            self._value = new_value
+            self._sensor.set_value(new_value, status=self._status_func(new_value))
+
+
+__all__ = ['set_telstate_entry', 'Range', 'SensorWrapper']
