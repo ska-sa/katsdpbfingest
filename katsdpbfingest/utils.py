@@ -193,6 +193,7 @@ class SensorWrapper(object):
     """
     def __init__(self, sensor, initial_value=None, status_func=lambda x: katcp.Sensor.NOMINAL):
         self._sensor = sensor
+        self._status = sensor.status()
         self._value = sensor.value()
         self._status_func = status_func
         if initial_value is not None:
@@ -204,9 +205,11 @@ class SensorWrapper(object):
 
     @value.setter
     def value(self, new_value):
-        if new_value != self._value:
+        new_status = self._status_func(new_value)
+        if new_value != self._value or new_status != self._status:
             self._value = new_value
-            self._sensor.set_value(new_value, status=self._status_func(new_value))
+            self._status = new_status
+            self._sensor.set_value(new_value, status=new_status)
 
 
 __all__ = ['set_telstate_entry', 'Range', 'SensorWrapper']
