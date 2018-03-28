@@ -5,7 +5,6 @@ import os.path
 import logging
 import socket
 import contextlib
-import time
 
 import concurrent.futures
 
@@ -49,7 +48,6 @@ def _config_from_telstate(args, config, name_map):
         value = telstate[telstate_name]
         _logger.info('Setting %s to %s from telstate', attr_name, value)
         setattr(config, attr_name, value)
-
 
 
 def _create_session_config(args):

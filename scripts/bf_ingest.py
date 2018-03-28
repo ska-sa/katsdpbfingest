@@ -9,7 +9,6 @@ from trollius import From
 import argparse
 import os
 import sys
-import time
 import katsdptelstate.endpoint
 import spead2
 import katsdpservices
@@ -31,15 +30,35 @@ def main():
     katsdpservices.setup_restart()
     parser = katsdpservices.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), default=':7148', help='endpoints to listen for CBF SPEAD stream (including multicast IPs). [<ip>[+<count>]][:port].', metavar='ENDPOINTS')
-    parser.add_argument('--stream-name', type=str, metavar='NAME', help='Stream name for metadata in telstate')
-    parser.add_argument('--channels', type=Range.parse, metavar='A:B', help='Output channels')
-    parser.add_argument('--log-level', '-l', type=str, metavar='LEVEL', default=None, help='log level')
-    parser.add_argument('--file-base', default='.', type=str, help='base directory into which to write HDF5 files', metavar='DIR')
-    parser.add_argument('--affinity', type=spead2.parse_range_list, help='List of CPUs to which to bind threads', metavar='CPU,CPU')
-    parser.add_argument('--interface', type=str, help='Network interface for multicast subscription')
-    parser.add_argument('--direct-io', action='store_true', help='Use Direct I/O VFD for writing the file')
-    parser.add_argument('--ibv', action='store_true', help='Use libibverbs when possible')
+    parser.add_argument(
+        '--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148),
+        default=':7148', metavar='ENDPOINTS',
+        help=('endpoints to listen for CBF SPEAD stream (including multicast IPs). '
+              '[<ip>[+<count>]][:port].'))
+    parser.add_argument(
+        '--stream-name', type=str, metavar='NAME',
+        help='Stream name for metadata in telstate')
+    parser.add_argument(
+        '--channels', type=Range.parse, metavar='A:B',
+        help='Output channels')
+    parser.add_argument(
+        '--log-level', '-l', type=str, metavar='LEVEL', default=None,
+        help='log level')
+    parser.add_argument(
+        '--file-base', default='.', type=str, metavar='DIR',
+        help='base directory into which to write HDF5 files')
+    parser.add_argument(
+        '--affinity', type=spead2.parse_range_list, metavar='CPU,CPU',
+        help='List of CPUs to which to bind threads')
+    parser.add_argument(
+        '--interface', type=str,
+        help='Network interface for multicast subscription')
+    parser.add_argument(
+        '--direct-io', action='store_true',
+        help='Use Direct I/O VFD for writing the file')
+    parser.add_argument(
+        '--ibv', action='store_true',
+        help='Use libibverbs when possible')
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
     args = parser.parse_args()
