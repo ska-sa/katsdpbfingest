@@ -2,9 +2,6 @@
 
 import logging
 
-import katsdptelstate
-import katcp
-
 
 _logger = logging.getLogger(__name__)
 
@@ -33,14 +30,6 @@ def cbf_telstate_view(telstate, stream_name):
     prefixes.append(instrument)
     prefixes = [prefix + telstate.SEPARATOR for prefix in prefixes]
     return telstate.__class__(prefixes=prefixes, base=telstate)
-
-
-def set_telstate_entry(telstate, name, value, attribute=True):
-    if telstate is not None:
-        try:
-            telstate.add(name, value, immutable=attribute)
-        except katsdptelstate.ImmutableKeyError as error:
-            _logger.warning('%s', error)
 
 
 class Range(object):
@@ -179,37 +168,4 @@ class Range(object):
                      self.start + (chunk_id + 1) * chunk_size)
 
 
-class SensorWrapper(object):
-    """Convenience wrapper around a sensor.
-
-    It
-    - Provides property access to the value
-    - Caches the value of the sensor (removes the need for locking)
-    - Filters out updates that don't change the value
-    - Allows the status to be computed from the value
-
-    Because of the caching, it is important that the sensor is not modified
-    other than through the wrapper.
-    """
-    def __init__(self, sensor, initial_value=None, status_func=lambda x: katcp.Sensor.NOMINAL):
-        self._sensor = sensor
-        self._status = sensor.status()
-        self._value = sensor.value()
-        self._status_func = status_func
-        if initial_value is not None:
-            self.value = initial_value
-
-    @property
-    def value(self):
-        return self._value
-
-    @value.setter
-    def value(self, new_value):
-        new_status = self._status_func(new_value)
-        if new_value != self._value or new_status != self._status:
-            self._value = new_value
-            self._status = new_status
-            self._sensor.set_value(new_value, status=new_status)
-
-
-__all__ = ['cbf_telstate_view', 'set_telstate_entry', 'Range', 'SensorWrapper']
+__all__ = ['cbf_telstate_view', 'Range']
