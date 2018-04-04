@@ -212,4 +212,4 @@ class SensorWrapper(object):
             self._sensor.set_value(new_value, status=new_status)
 
 
-__all__ = ['set_telstate_entry', 'Range', 'SensorWrapper']
+__all__ = ['cbf_telstate_view', 'set_telstate_entry', 'Range', 'SensorWrapper']

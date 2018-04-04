@@ -1,0 +1,30 @@
+backports-abc             # via tornado
+certifi                   # via tornado
+dask==0.17.0              # via katsdpfilewriter
+fakeredis                 # via katsdptelstate
+future                    # via katcp, katpoint
+futures
+h5py
+ipaddress                 # via katsdptelstate
+katcp
+katdal==0.9.5             # via katsdpfilewriter
+katpoint==0.7             # via katdal
+katversion
+hiredis                   # via katsdptelstate
+netifaces                 # via katsdptelstate
+numpy
+pkgconfig==1.2.2
+ply                       # via katcp
+pybind11==2.1.1
+pyephem                   # via katpoint
+pygelf                    # via katsdpservices
+redis                     # via katsdptelstate
+singledispatch            # via tornado
+six                       # via h5py, singledispatch, spead2, trollius
+spead2                    # via katsdpfilewriter
+toolz==0.9.0              # via dask
+tornado
+trollius
+git+ssh://git@github.com/ska-sa/katsdpdata#egg=katsdpfilewriter&subdirectory=katsdpfilewriter
+git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
+git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate

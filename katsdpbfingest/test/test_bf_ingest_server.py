@@ -24,7 +24,7 @@ from nose.tools import assert_equal, assert_true, assert_false
 import katsdptelstate
 from katsdptelstate import endpoint
 
-from katsdpingest import bf_ingest_server, _bf_ingest_session
+from katsdpbfingest import bf_ingest_server, _bf_ingest_session
 from ..utils import Range
 
 
@@ -139,7 +139,7 @@ class TestCaptureServer(object):
         ig.add_item(name='frequency', id=0x4103,
                     description='The frequency channel of the data in this HEAP.',
                     shape=(), format=[('u', 48)])
-        ig.add_item(name='bf_raw',  id=0x5000,
+        ig.add_item(name='bf_raw', id=0x5000,
                     description='Beamformer data',
                     shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
         streams = [spead2.send.UdpStream(

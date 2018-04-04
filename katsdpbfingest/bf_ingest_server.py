@@ -25,7 +25,7 @@ import katsdpservices.asyncio
 from ._bf_ingest_session import Session, SessionConfig
 from . import utils
 from .utils import Range
-import katsdpingest
+import katsdpbfingest
 
 
 _logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def _config_from_telstate(args, config, name_map):
     ----------
     args : :class:`argparse.Namespace`
         Command-line arguments
-    config : :class:`katsdpingest._bf_ingest_session.SessionConfig`
+    config : :class:`katsdpbfingest._bf_ingest_session.SessionConfig`
         Configuration object to populate
     name_map : dict
         Mapping from attribute name in config to telstate name suffix
@@ -120,7 +120,7 @@ class _CaptureSession(object):
         Telescope state interface, if any
     _loop : :class:`trollius.BaseEventLoop`
         Event loop passed to the constructor
-    _session : :class:`katsdpingest._bf_ingest_session.Session`
+    _session : :class:`katsdpbfingest._bf_ingest_session.Session`
         C++-driven capture session
     _run_future : :class:`trollius.Task`
         Task for the coroutine that waits for the C++ code and finalises
@@ -215,7 +215,7 @@ class CaptureServer(object):
         IO Loop passed to constructor
     _capture : :class:`_CaptureSession`
         Current capture session, or ``None`` if not capturing
-    _config : :class:`katsdpingest.bf_ingest_session.SessionConfig`
+    _config : :class:`katsdpbfingest.bf_ingest_session.SessionConfig`
         Configuration, with the filename to be filled in on capture-init
     """
     def __init__(self, args, loop):
@@ -271,7 +271,7 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
     """
 
     VERSION_INFO = ('bf-ingest', 1, 0)
-    BUILD_INFO = ('katsdpingest',) + tuple(katsdpingest.__version__.split('.', 1)) + ('',)
+    BUILD_INFO = ('katsdpbfingest',) + tuple(katsdpbfingest.__version__.split('.', 1)) + ('',)
 
     def __init__(self, args, loop):
         CaptureServer.__init__(self, args, loop)

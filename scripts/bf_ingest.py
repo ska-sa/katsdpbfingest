@@ -12,8 +12,8 @@ import sys
 import katsdptelstate.endpoint
 import spead2
 import katsdpservices
-from katsdpingest.bf_ingest_server import KatcpCaptureServer
-from katsdpingest.utils import Range
+from katsdpbfingest.bf_ingest_server import KatcpCaptureServer
+from katsdpbfingest.utils import Range
 
 
 @trollius.coroutine
