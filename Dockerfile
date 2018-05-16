@@ -26,12 +26,13 @@ RUN echo -e "Name: HDF5\nDescription: Hierarchical Data Format 5 (HDF5)\nVersion
 USER kat
 
 # Install dependencies. We need to set library-dirs so that the new libhdf5
-# will be found.
+# will be found. We must avoid using the h5py wheel, because it will contain
+# its own hdf5 libraries while we want to link to the system ones.
 ENV PATH="$PATH_PYTHON2" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON2"
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
 WORKDIR /tmp/install
 RUN /bin/echo -e '[build_ext]\nlibrary-dirs=/usr/local/lib' > setup.cfg
-RUN install-requirements.py -d ~/docker-base/base-requirements.txt -r /tmp/install/requirements.txt
+RUN install-requirements.py --no-binary=h5py -d ~/docker-base/base-requirements.txt -r /tmp/install/requirements.txt
 
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpbfingest

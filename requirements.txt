@@ -1,5 +1,3 @@
---no-binary h5py          # Because we're using a custom libhdf5 build
-
 backports-abc             # via tornado
 certifi                   # via tornado
 dask                      # via katsdpfilewriter
