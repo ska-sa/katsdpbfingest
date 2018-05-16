@@ -8,3 +8,4 @@ katsdpbfingest/_bf_ingest_session.so
 *.egg-info
 *.pyc
 __pycache__
+Dockerfile

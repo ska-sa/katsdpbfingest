@@ -1,3 +1,5 @@
+--no-binary h5py          # Because we're using a custom libhdf5 build
+
 backports-abc             # via tornado
 certifi                   # via tornado
 dask                      # via katsdpfilewriter
@@ -15,7 +17,7 @@ netifaces                 # via katsdptelstate
 numpy
 pkgconfig==1.2.2
 ply                       # via katcp
-pybind11==2.1.1
+pybind11==2.2.3
 pyephem                   # via katpoint
 pygelf                    # via katsdpservices
 redis                     # via katsdptelstate
