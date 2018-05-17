@@ -250,7 +250,7 @@ private:
     H5::DSetMemXferPropList dxpl;
 
 public:
-    hdf5_bf_raw_writer(H5::CommonFG &parent, int channels,
+    hdf5_bf_raw_writer(H5::Group &parent, int channels,
                        int spectra_per_heap,
                        const char *name);
 
@@ -258,7 +258,7 @@ public:
 };
 
 hdf5_bf_raw_writer::hdf5_bf_raw_writer(
-    H5::CommonFG &parent, int channels, int spectra_per_heap, const char *name)
+    H5::Group &parent, int channels, int spectra_per_heap, const char *name)
     : channels(channels), spectra_per_heap(spectra_per_heap),
     dxpl(make_dxpl_direct(std::size_t(channels) * spectra_per_heap * 2))
 {
@@ -299,7 +299,7 @@ public:
     const int spectra_per_heap;
     const std::uint64_t ticks_between_spectra;
 
-    hdf5_timestamps_writer(H5::CommonFG &parent, int spectra_per_heap,
+    hdf5_timestamps_writer(H5::Group &parent, int spectra_per_heap,
                            std::uint64_t ticks_between_spectra, const char *name);
     ~hdf5_timestamps_writer();
     // Add a heap's worth of timestamps
@@ -317,7 +317,7 @@ static void set_string_attribute(H5::H5Object &location, const std::string &name
 }
 
 hdf5_timestamps_writer::hdf5_timestamps_writer(
-    H5::CommonFG &parent, int spectra_per_heap,
+    H5::Group &parent, int spectra_per_heap,
     std::uint64_t ticks_between_spectra, const char *name)
     : dxpl(make_dxpl_direct(chunk * sizeof(std::uint64_t))),
     spectra_per_heap(spectra_per_heap),
@@ -408,7 +408,7 @@ private:
     static std::size_t compute_chunk_size(int heaps_per_slice);
     void flush(flags_chunk &chunk);
 public:
-    hdf5_flags_writer(H5::CommonFG &parent, int heaps_per_slice, int spectra_per_heap,
+    hdf5_flags_writer(H5::Group &parent, int heaps_per_slice, int spectra_per_heap,
                       const char *name);
     ~hdf5_flags_writer();
     void add(const slice &s);
@@ -422,7 +422,7 @@ std::size_t hdf5_flags_writer::compute_chunk_size(int heaps_per_slice)
 }
 
 hdf5_flags_writer::hdf5_flags_writer(
-    H5::CommonFG &parent, int heaps_per_slice, int spectra_per_heap,
+    H5::Group &parent, int heaps_per_slice, int spectra_per_heap,
     const char *name)
     : window<flags_chunk, hdf5_flags_writer>(1, compute_chunk_size(heaps_per_slice)),
     spectra_per_heap(spectra_per_heap),
