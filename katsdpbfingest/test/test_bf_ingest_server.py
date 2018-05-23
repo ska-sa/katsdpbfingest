@@ -106,7 +106,7 @@ class TestCaptureServer(object):
     def _test_manual_stop_no_data(self):
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
         assert_false(server.capturing)
-        yield From(server.start_capture())
+        yield From(server.start_capture('1122334455'))
         assert_true(server.capturing)
         yield From(trollius.sleep(0.01, loop=self.loop))
         yield From(server.stop_capture())
@@ -128,7 +128,7 @@ class TestCaptureServer(object):
 
         # Start up the server
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
-        filename = yield From(server.start_capture())
+        filename = yield From(server.start_capture('1122334455'))
         time.sleep(0.1)
         # Send it a SPEAD stream
         config = spead2.send.StreamConfig(max_packet_size=4196, rate=1e9 / 8)

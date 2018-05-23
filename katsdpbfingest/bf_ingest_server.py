@@ -229,13 +229,13 @@ class CaptureServer(object):
         return self._capture is not None
 
     @trollius.coroutine
-    def start_capture(self):
+    def start_capture(self, capture_block_id):
         """Start capture to file, if not already in progress.
 
         This is a co-routine.
         """
         if self._capture is None:
-            basename = '{}.h5'.format(int(time.time()))
+            basename = '{}_{}.h5'.format(capture_block_id, self._args.stream_name)
             self._config.filename = os.path.join(self._args.file_base, basename)
             self._capture = _CaptureSession(
                 self._config, self._args.telstate, self._args.stream_name, self._loop)
@@ -281,15 +281,15 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
         pass
 
     @tornado.gen.coroutine
-    def _start_capture(self):
+    def _start_capture(self, capture_block_id):
         """Tornado variant of :meth:`start_capture`"""
-        start_future = trollius.async(self.start_capture(), loop=self._loop)
+        start_future = trollius.async(self.start_capture(capture_block_id), loop=self._loop)
         yield katsdpservices.asyncio.to_tornado_future(start_future)
 
-    @request(Str(optional=True))
+    @request(Str())
     @return_reply()
     @tornado.gen.coroutine
-    def request_capture_init(self, sock, capture_block_id=None):
+    def request_capture_init(self, sock, capture_block_id):
         """Start capture to file."""
         if self.capturing:
             raise tornado.gen.Return(('fail', 'already capturing'))
@@ -297,7 +297,7 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
         if stat.f_bavail / stat.f_blocks < 0.05:
             raise tornado.gen.Return(('fail', 'less than 5% disk space free on {}'.format(
                 os.path.abspath(self._args.file_base))))
-        yield self._start_capture()
+        yield self._start_capture(capture_block_id)
         raise tornado.gen.Return(('ok',))
 
     @tornado.gen.coroutine
