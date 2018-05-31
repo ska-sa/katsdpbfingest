@@ -6,7 +6,6 @@ kattelmod
 """
 
 from .telescope_model import TelescopeComponent, TelescopeModel
-from katdal.h5datav3 import FLAG_NAMES, FLAG_DESCRIPTIONS
 
 
 # Component Definitions
@@ -55,5 +54,4 @@ def create_model(antenna_mask=[]):
 
     model = TelescopeModel()
     model.add_components(components)
-    model.set_flags_description(zip(FLAG_NAMES, FLAG_DESCRIPTIONS))
     return model

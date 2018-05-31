@@ -47,7 +47,6 @@ class TelescopeModel(object):
     """
     def __init__(self):
         self.components = {}
-        self.flags_description = []
 
     @classmethod
     def enable_debug(cls, debug=True):
@@ -64,11 +63,6 @@ class TelescopeModel(object):
                 continue
             self.components[component.name] = component
         logger.debug("Added %d components to model.", len(self.components))
-
-    def set_flags_description(self, flags_description):
-        """Set names and descriptions for flags. `flags_description` is a list
-        of (name, description) tuples."""
-        self.flags_description = flags_description
 
 
 class TelescopeModelData(object):
@@ -92,10 +86,6 @@ class TelescopeModelData(object):
     @property
     def components(self):
         return self.model.components
-
-    @property
-    def flags_description(self):
-        return self.model.flags_description
 
     def get_attribute_value(self, attribute):
         """Return the value of an attribute.
