@@ -18,12 +18,11 @@ import tornado
 import katcp
 from katcp.kattypes import request, return_reply, Str
 
-from katsdpfilewriter import telescope_model, ar1_model, file_writer
 import katsdpservices
 import katsdpservices.asyncio
 
 from ._bf_ingest_session import Session, SessionConfig
-from . import utils
+from . import utils, telescope_model, ar1_model, file_writer
 from .utils import Range
 import katsdpbfingest
 
