@@ -17,6 +17,7 @@ pygelf                    # via katsdpservices
 redis                     # via katsdptelstate
 singledispatch            # via tornado
 six                       # via h5py, singledispatch, spead2, trollius
+spead2
 tornado
 trollius
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices

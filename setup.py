@@ -89,6 +89,7 @@ setup(
         'katcp',
         'katsdpservices',
         'katsdptelstate',
+        'spead2',
         'tornado',
         'trollius'
     ],
