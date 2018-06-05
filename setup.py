@@ -90,7 +90,7 @@ setup(
         'katsdpfilewriter',
         'katsdpservices',
         'katsdptelstate',
-        'tornado',
+        'tornado<5',
         'trollius'
     ],
     extras_require={
