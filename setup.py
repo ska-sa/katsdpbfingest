@@ -90,7 +90,7 @@ setup(
         'katsdpservices',
         'katsdptelstate',
         'spead2',
-        'tornado',
+        'tornado<5',
         'trollius'
     ],
     extras_require={
