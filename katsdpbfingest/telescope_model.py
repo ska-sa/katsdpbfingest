@@ -124,7 +124,7 @@ class TelstateModelData(TelescopeModelData):
 
     Parameters
     ----------
-    model : :class:`katsdpfilewriter.telescope_model.TelescopeModel`
+    model : :class:`TelescopeModel`
         Underlying model
     telstate : :class:`katsdptelstate.TelescopeState`
         Telescope state containing the metadata
