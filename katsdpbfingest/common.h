@@ -193,10 +193,17 @@ struct session_config
     int spectra_per_heap = -1;
     int channels_per_heap = -1;
 
+    boost::asio::ip::udp::endpoint stats_endpoint;
+    boost::asio::ip::address stats_interface_address;
+
     explicit session_config(const std::string &filename);
     void add_endpoint(const std::string &bind_host, std::uint16_t port);
     std::string get_interface_address() const;
     void set_interface_address(const std::string &address);
+
+    void set_stats_endpoint(const std::string &host, std::uint16_t port);
+    std::string get_stats_interface_address() const;
+    void set_stats_interface_address(const std::string &address);
 };
 
 #endif // COMMON_H

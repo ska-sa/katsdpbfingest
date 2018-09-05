@@ -94,7 +94,9 @@ class TestCaptureServer(object):
             stream_name='i0_tied_array_channelised_voltage_0x',
             affinity=None,
             interface='lo',
-            telstate=telstate)
+            telstate=telstate,
+            stats=endpoint.Endpoint('239.102.3.0', 7149),
+            stats_interface='lo')
         self.loop = trollius.get_event_loop()
 
     def teardown(self):

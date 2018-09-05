@@ -59,6 +59,12 @@ def main():
     parser.add_argument(
         '--ibv', action='store_true',
         help='Use libibverbs when possible')
+    parser.add_argument(
+        '--stats', type=katsdptelstate.endpoint.endpoint_parser(7149), metavar='ENDPOINT',
+        help='Send statistics to a signal display server at this address')
+    parser.add_argument(
+        '--stats-interface', type=str,
+        help='Network interface for signal display stream')
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
     args = parser.parse_args()

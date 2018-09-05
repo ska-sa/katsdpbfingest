@@ -92,6 +92,11 @@ def _create_session_config(args):
     config.channel_offset = args.channels.start
     for endpoint in args.cbf_spead[endpoint_range]:
         config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
+    if args.stats is not None:
+        config.set_stats_endpoint(args.stats.host, args.stats.port)
+        if args.stats_interface is not None:
+            config.stats_interface_address = \
+                katsdpservices.get_interface_address(args.stats_interface)
 
     return config
 

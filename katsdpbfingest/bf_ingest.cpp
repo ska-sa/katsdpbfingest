@@ -62,7 +62,9 @@ PYBIND11_MODULE(_bf_ingest, m)
         .def_readwrite("spectra_per_heap", &session_config::spectra_per_heap)
         .def_readwrite("channels_per_heap", &session_config::channels_per_heap)
         .def_readwrite("channel_offset", &session_config::channel_offset)
-        .def("add_endpoint", &session_config::add_endpoint, "bind_host"_a, "port"_a);
+        .def("add_endpoint", &session_config::add_endpoint, "bind_host"_a, "port"_a)
+        .def_property("stats_interface_address", &session_config::get_stats_interface_address, &session_config::set_stats_interface_address)
+        .def("set_stats_endpoint", &session_config::set_stats_endpoint, "host"_a, "port"_a)
     ;
     py::class_<session>(m, "Session", "Capture session")
         .def(py::init<const session_config &>(), "config"_a)

@@ -11,6 +11,7 @@
 #include "common.h"
 #include "session.h"
 #include "writer.h"
+#include "stats.h"
 
 // TODO: only used for gil_scoped_release. Would be nice to find a way to avoid
 // having this file depend on pybind11.
@@ -77,6 +78,13 @@ void session::run_impl()
     int spectra_per_heap = config.spectra_per_heap;
     std::int64_t ticks_between_spectra = config.ticks_between_spectra;
 
+    std::unique_ptr<stats_collector> stats;
+    if (!config.stats_endpoint.address().is_unspecified())
+    {
+        stats.reset(new stats_collector(config.stats_endpoint, config.stats_interface_address,
+                                        channels, spectra_per_heap));
+    }
+
     hdf5_writer w(config.filename, config.direct,
                   channels, channels_per_heap, spectra_per_heap, ticks_between_spectra);
     int fd = w.get_fd();
@@ -98,6 +106,8 @@ void session::run_impl()
         {
             slice s = ring.pop();
             n_heaps += s.n_present;
+            if (stats)
+                stats->add(s);
             w.add(s);
             std::int64_t time_heaps = (s.spectrum + spectra_per_heap) / spectra_per_heap;
             std::int64_t total_heaps = time_heaps * (channels / channels_per_heap);

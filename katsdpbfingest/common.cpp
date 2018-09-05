@@ -48,3 +48,19 @@ void session_config::set_interface_address(const std::string &address)
 {
     interface_address = boost::asio::ip::address_v4::from_string(address);
 }
+
+void session_config::set_stats_endpoint(const std::string &host, std::uint16_t port)
+{
+    stats_endpoint = boost::asio::ip::udp::endpoint(
+        boost::asio::ip::address_v4::from_string(host), port);
+}
+
+std::string session_config::get_stats_interface_address() const
+{
+    return stats_interface_address.to_string();
+}
+
+void session_config::set_stats_interface_address(const std::string &address)
+{
+    stats_interface_address = boost::asio::ip::address_v4::from_string(address);
+}
