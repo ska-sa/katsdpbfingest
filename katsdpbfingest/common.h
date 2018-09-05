@@ -14,6 +14,7 @@ namespace pybind11 { class object; }
 
 void log_message(spead2::log_level level, const std::string &msg);
 void set_logger(pybind11::object logger);
+void clear_logger();
 
 /**
  * Recursively push a variadic list of arguments into a @c boost::format. This

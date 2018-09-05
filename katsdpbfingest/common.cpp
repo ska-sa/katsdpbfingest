@@ -4,16 +4,21 @@
 #include <spead2/py_common.h>
 #include "common.h"
 
-static spead2::log_function_python logger;
+static std::unique_ptr<spead2::log_function_python> logger;
 
 void log_message(spead2::log_level level, const std::string &msg)
 {
-    logger(level, msg);
+    (*logger)(level, msg);
 }
 
 void set_logger(pybind11::object logger_object)
 {
-    logger = spead2::log_function_python(logger_object);
+    logger.reset(new spead2::log_function_python(logger_object));
+}
+
+void clear_logger()
+{
+    logger.reset();
 }
 
 std::vector<int> affinity_vector(int affinity)

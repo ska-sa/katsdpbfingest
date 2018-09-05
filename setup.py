@@ -39,13 +39,18 @@ class BuildExt(build_ext):
         subprocess.check_call(os.path.abspath('spead2/configure'), cwd=self.build_temp)
         # Ugly hack to add libraries conditional on configure result
         have_ibv = False
+        have_pcap = False
         with open(os.path.join(self.build_temp, 'include', 'spead2', 'common_features.h')) as f:
             for line in f:
                 if line.strip() == '#define SPEAD2_USE_IBV 1':
                     have_ibv = True
+                elif line.strip() == '#define SPEAD2_USE_PCAP 1':
+                    have_pcap = True
         for extension in self.extensions:
             if have_ibv:
                 extension.libraries.extend(['rdmacm', 'ibverbs'])
+            if have_pcap:
+                extension.libraries.extend(['pcap'])
             extension.include_dirs.insert(0, os.path.join(self.build_temp, 'include'))
         # distutils uses old-style classes, so no super
         build_ext.run(self)
@@ -57,16 +62,16 @@ extensions = [
         sources=(glob.glob('spead2/src/common_*.cpp') +
                  glob.glob('spead2/src/recv_*.cpp') +
                  glob.glob('spead2/src/send_*.cpp') +
+                 glob.glob('spead2/src/py_common.cpp') +
                  glob.glob('katsdpbfingest/*.cpp')),
         depends=(glob.glob('spead2/include/spead2/*.h') +
+                 glob.glob('spead2/3rdparty/pybind11/include/pybind11/*.h') +
+                 glob.glob('spead2/3rdparty/pybind11/include/pybind11/detail/*.h') +
                  glob.glob('katsdpbfingest/*.h')),
         language='c++',
-        include_dirs=[
-            'spead2/include',
-            get_include('pybind11'),
-            get_include('pybind11', user=True)] + hdf5['include_dirs'],
+        include_dirs=['spead2/include', 'spead2/3rdparty/pybind11/include'] + hdf5['include_dirs'],
         define_macros=hdf5['define_macros'],
-        extra_compile_args=['-std=c++11', '-g0', '-fvisibility=hidden'],
+        extra_compile_args=['-std=c++11', '-O0', '-fvisibility=hidden'],
         library_dirs=hdf5['library_dirs'],
         libraries=['boost_system', 'hdf5_cpp'] + hdf5['libraries']
     )
@@ -82,7 +87,7 @@ setup(
     ext_modules=extensions,
     cmdclass={'build_ext': BuildExt},
     scripts=["scripts/bf_ingest.py"],
-    setup_requires=['katversion', 'pkgconfig', 'pybind11'],
+    setup_requires=['katversion', 'pkgconfig'],
     install_requires=[
         'h5py',
         'futures',

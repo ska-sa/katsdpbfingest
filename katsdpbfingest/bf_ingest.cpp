@@ -27,7 +27,9 @@
  * - make Python code more robust to the file being corrupt?
  */
 
+#include <memory>
 #include <string>
+#include <functional>
 #include <pybind11/pybind11.h>
 #include <spead2/common_logging.h>
 #include <spead2/py_common.h>
@@ -36,10 +38,12 @@
 
 namespace py = pybind11;
 
-PYBIND11_PLUGIN(_bf_ingest)
+static std::unique_ptr<spead2::log_function_python> spead2_logger;
+
+PYBIND11_MODULE(_bf_ingest, m)
 {
     using namespace pybind11::literals;
-    py::module m("_bf_ingest", "C++ backend of beamformer capture");
+    m.doc() = "C++ backend of beamformer capture";
 
     py::class_<session_config>(m, "SessionConfig", "Configuration data for the backend")
         .def(py::init<const std::string &>(), "filename"_a)
@@ -70,10 +74,12 @@ PYBIND11_PLUGIN(_bf_ingest)
     ;
 
     py::object logging_module = py::module::import("logging");
-    py::object spead2_logger = logging_module.attr("getLogger")("spead2");
-    py::object my_logger = logging_module.attr("getLogger")("katsdpbfingest.bf_ingest");
-    spead2::set_log_function(spead2::log_function_python(spead2_logger));
-    set_logger(my_logger);
+    py::object my_logger_obj = logging_module.attr("getLogger")("katsdpbfingest.bf_ingest");
+    set_logger(my_logger_obj);
 
-    return m.ptr();
+    py::module atexit_mod = py::module::import("atexit");
+    atexit_mod.attr("register")(py::cpp_function(clear_logger));
+
+    spead2::register_logging();
+    spead2::register_atexit();
 }

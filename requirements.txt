@@ -12,7 +12,6 @@ netifaces                 # via katsdptelstate
 numpy
 pkgconfig==1.2.2
 ply                       # via katcp
-pybind11==2.2.3
 pygelf                    # via katsdpservices
 redis                     # via katsdptelstate
 singledispatch            # via tornado
