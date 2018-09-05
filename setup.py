@@ -35,7 +35,7 @@ class get_include(object):
 class BuildExt(build_ext):
     def run(self):
         self.mkpath(self.build_temp)
-        subprocess.check_call(['./bootstrap.sh'], cwd='spead2')
+        subprocess.check_call(['./bootstrap.sh', '--no-python'], cwd='spead2')
         subprocess.check_call(os.path.abspath('spead2/configure'), cwd=self.build_temp)
         # Ugly hack to add libraries conditional on configure result
         have_ibv = False
