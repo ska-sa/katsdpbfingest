@@ -1,7 +1,11 @@
 #include <vector>
 #include <complex>
+#include <cassert>
+#include <utility>
+#include <sstream>
 #include <spead2/send_stream.h>
 #include <spead2/send_udp.h>
+#include <spead2/common_endian.h>
 #include "common.h"
 #include "stats.h"
 
@@ -14,6 +18,33 @@ static constexpr int id_sd_timestamp = 0x3502;
 static constexpr int id_sd_data = 0x3507;
 static constexpr int id_sd_data_index = 0x3509;
 
+static spead2::flavour make_flavour()
+{
+    return spead2::flavour(4, 64, 48);
+}
+
+static void add_descriptor(spead2::send::heap &heap,
+                           spead2::s_item_pointer_t id,
+                           std::string name, std::string description,
+                           const std::vector<int> &shape,
+                           std::string dtype)
+{
+    spead2::descriptor d;
+    d.id = id;
+    d.name = std::move(name);
+    d.description = std::move(description);
+    std::ostringstream numpy_header;
+    numpy_header << "{'shape': (";
+    for (auto s : shape)
+    {
+        assert(s >= 0);
+        numpy_header << s << ", ";
+    }
+    char endian_char = spead2::htobe(std::uint16_t(0x1234)) == 0x1234 ? '>' : '<';
+    numpy_header << "), 'fortran_order': False, 'descr': '" << endian_char << dtype << "'}";
+    d.numpy_header = numpy_header.str();
+    heap.add_descriptor(d);
+}
 
 void stats_collector::send_heap(const spead2::send::heap &heap)
 {
@@ -36,13 +67,15 @@ stats_collector::stats_collector(const boost::asio::ip::udp::endpoint &endpoint,
     stream(io_service, endpoint,
            spead2::send::stream_config(8872),
            spead2::send::udp_stream::default_buffer_size,
-           1, interface_address)
+           1, interface_address),
+    data_heap(make_flavour())
 {
     assert(spectra_per_heap < 32768); // otherwise overflows can occur
     spead2::send::heap start_heap;
     start_heap.add_start();
     send_heap(start_heap);
-    // TODO: send descriptors
+    add_descriptor(data_heap, id_sd_data, "sd_data", "Power spectrum",
+                   {channels, 1, 2}, "f4");
     interval = 1;  // TODO: base on scale_factor_timestamp
 
     // TODO: all the other fields

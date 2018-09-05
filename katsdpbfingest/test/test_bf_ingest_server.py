@@ -16,7 +16,7 @@ import trollius
 from trollius import From
 
 import spead2
-import spead2.recv.trollius
+import spead2.recv
 import spead2.send
 
 from nose.tools import assert_equal, assert_true, assert_false
@@ -128,6 +128,14 @@ class TestCaptureServer(object):
         drop[2, 9] = True
         drop[7, 24] = True
 
+        # Start a receiver to get the signal display stream.
+        # It need a deep queue because we don't service it while it is
+        # running.
+        rx = spead2.recv.Stream(spead2.ThreadPool(), max_heaps=2, ring_heaps=100)
+        rx.stop_on_stop_item = False
+        rx.add_udp_reader(self.args.stats.host, self.args.stats.port,
+                          interface_address='127.0.0.1')
+
         # Start up the server
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
         filename = yield From(server.start_capture('1122334455'))
@@ -216,6 +224,15 @@ class TestCaptureServer(object):
             data = h5file['/Data']
             assert_equal('i0_tied_array_channelised_voltage_0x', data.attrs['stream_name'])
             assert_equal(self.args.channels.start, data.attrs['channel_offset'])
+
+        # Validate the signal display stream
+        rx.stop()
+        heaps = list(rx)
+        assert_true(heaps[0].is_start_of_stream())
+        assert_true(heaps[-1].is_end_of_stream())
+        ig = spead2.ItemGroup()
+        for heap in heaps[1:-1]:
+            updated = ig.update(heap)
 
     def test_stream_end(self):
         """Stream ends with an end-of-stream"""

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <complex>
+#include <string>
 #include <spead2/send_stream.h>
 #include <spead2/send_udp.h>
 #include <vector>
