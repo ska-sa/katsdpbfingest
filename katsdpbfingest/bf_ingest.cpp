@@ -36,10 +36,10 @@
 
 namespace py = pybind11;
 
-PYBIND11_PLUGIN(_bf_ingest_session)
+PYBIND11_PLUGIN(_bf_ingest)
 {
     using namespace pybind11::literals;
-    py::module m("_bf_ingest_session", "C++ backend of beamformer capture");
+    py::module m("_bf_ingest", "C++ backend of beamformer capture");
 
     py::class_<session_config>(m, "SessionConfig", "Configuration data for the backend")
         .def(py::init<const std::string &>(), "filename"_a)
@@ -71,7 +71,7 @@ PYBIND11_PLUGIN(_bf_ingest_session)
 
     py::object logging_module = py::module::import("logging");
     py::object spead2_logger = logging_module.attr("getLogger")("spead2");
-    py::object my_logger = logging_module.attr("getLogger")("katsdpbfingest.bf_ingest_session");
+    py::object my_logger = logging_module.attr("getLogger")("katsdpbfingest.bf_ingest");
     spead2::set_log_function(spead2::log_function_python(spead2_logger));
     set_logger(my_logger);
 

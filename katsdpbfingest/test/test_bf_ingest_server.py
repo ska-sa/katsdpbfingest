@@ -24,7 +24,7 @@ from nose.tools import assert_equal, assert_true, assert_false
 import katsdptelstate
 from katsdptelstate import endpoint
 
-from katsdpbfingest import bf_ingest_server, _bf_ingest_session
+from katsdpbfingest import bf_ingest_server, _bf_ingest
 from ..utils import Range
 
 
@@ -45,13 +45,13 @@ class TestSession(object):
 
     def test_no_stop(self):
         """Deleting a session without stopping it must tidy up"""
-        config = _bf_ingest_session.SessionConfig(os.path.join(self.tmpdir, 'test_no_stop.h5'))
+        config = _bf_ingest.SessionConfig(os.path.join(self.tmpdir, 'test_no_stop.h5'))
         config.add_endpoint('239.1.2.3', self.port)
         config.channels = 4096
         config.channels_per_heap = 256
         config.spectra_per_heap = 256
         config.ticks_between_spectra = 8192
-        _bf_ingest_session.Session(config)
+        _bf_ingest.Session(config)
 
 
 class TestCaptureServer(object):

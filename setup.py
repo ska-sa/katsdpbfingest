@@ -53,7 +53,7 @@ class BuildExt(build_ext):
 
 extensions = [
     Extension(
-        '_bf_ingest_session',
+        '_bf_ingest',
         sources=(glob.glob('spead2/src/common_*.cpp') +
                  glob.glob('spead2/src/recv_*.cpp') +
                  glob.glob('spead2/src/send_*.cpp') +

@@ -4,7 +4,7 @@ temp
 cover
 .coverage
 doc/_build
-katsdpbfingest/_bf_ingest_session.so
+katsdpbfingest/_bf_ingest.so
 *.egg-info
 *.pyc
 __pycache__
