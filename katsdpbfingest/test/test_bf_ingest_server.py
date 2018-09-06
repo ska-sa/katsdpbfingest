@@ -19,7 +19,7 @@ import spead2
 import spead2.recv
 import spead2.send
 
-from nose.tools import assert_equal, assert_true, assert_false, assert_in
+from nose.tools import assert_equal, assert_true, assert_false
 
 import katsdptelstate
 from katsdptelstate import endpoint
@@ -107,8 +107,9 @@ class TestCaptureServer(object):
             interface='lo',
             telstate=telstate,
             stats=endpoint.Endpoint('239.102.3.0', 7149),
-            stats_int_time=self.heaps_per_stats * self.ticks_between_spectra * self.spectra_per_heap
-                / self.adc_sample_rate,
+            stats_int_time=(self.heaps_per_stats *
+                            self.ticks_between_spectra * self.spectra_per_heap /
+                            self.adc_sample_rate),
             stats_interface='lo')
         self.loop = trollius.get_event_loop()
 
@@ -268,14 +269,14 @@ class TestCaptureServer(object):
 
             # Check calculations
             expected_ts_unix = (spectrum + 0.5 * spectra_per_stats) * self.ticks_between_spectra \
-                    / self.adc_sample_rate + 111111111.0
+                / self.adc_sample_rate + 111111111.0
             np.testing.assert_allclose(expected_ts_unix * 100.0, timestamp)
 
             index = np.s_[:, spectrum : spectrum + spectra_per_stats]
             frame_data = expected_data[index]
             frame_weight = expected_weight[index]
             weight_sum = np.sum(frame_weight, axis=1)
-            power = np.sum(frame_data.astype(np.float64)**2, axis=2) # Sum real+imag
+            power = np.sum(frame_data.astype(np.float64)**2, axis=2)    # Sum real+imag
             # Average over time. Can't use np.average because it complains if
             # weights sum to zero instead of giving a NaN.
             with np.errstate(divide='ignore', invalid='ignore'):
