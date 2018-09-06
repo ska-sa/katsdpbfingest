@@ -20,17 +20,17 @@ private:
      * updated immediately prior to transmission.
      */
     std::vector<std::complex<float>> power_spectrum_send;
-    spead2::send::heap data_heap;
 
     int spectra_per_heap;
     std::int64_t interval;   // transmit interval, in timestamp units
-    std::int64_t last_sent_timestamp = -1;
+    std::int64_t start_timestamp = -1; // first timestamp of current accumulation
 
     boost::asio::io_service io_service;
     spead2::send::udp_stream stream;
+    spead2::send::heap data_heap;
 
     void send_heap(const spead2::send::heap &heap);
-    void transmit(std::int64_t timestamp);
+    void transmit();
 
 public:
     stats_collector(const boost::asio::ip::udp::endpoint &endpoint,

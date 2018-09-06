@@ -86,6 +86,16 @@ stats_collector::stats_collector(const boost::asio::ip::udp::endpoint &endpoint,
 
 void stats_collector::add(const slice &s)
 {
+    if (start_timestamp == -1)
+        start_timestamp = s.timestamp;
+    assert(s.timestamp >= start_timestamp); // timestamps must be provided in order
+    if (s.timestamp >= start_timestamp + interval)
+    {
+        transmit();
+        // Get start timestamp that is of form first_timestamp + i * interval
+        start_timestamp += (s.timestamp - start_timestamp) / interval * interval;
+    }
+
     int channels = power_spectrum.size();
     int heaps = s.present.size();
     int channels_per_heap = channels / heaps;
@@ -109,19 +119,15 @@ void stats_collector::add(const slice &s)
             power_spectrum_weight[channel] += spectra_per_heap;
         }
     }
-
-    if (s.timestamp - last_sent_timestamp >= interval)
-        transmit(s.timestamp);
 }
 
-void stats_collector::transmit(std::int64_t timestamp)
+void stats_collector::transmit()
 {
     int channels = power_spectrum.size();
     for (int i = 0; i < channels; i++)
         power_spectrum_send[i] = float(power_spectrum[i]) / power_spectrum_weight[i];
 
     send_heap(data_heap);
-    last_sent_timestamp = timestamp;
 
     std::fill(power_spectrum.begin(), power_spectrum.end(), 0);
     std::fill(power_spectrum_weight.begin(), power_spectrum_weight.end(), 0);
@@ -129,6 +135,8 @@ void stats_collector::transmit(std::int64_t timestamp)
 
 stats_collector::~stats_collector()
 {
+    if (start_timestamp != -1)
+        transmit();
     spead2::send::heap heap;
     heap.add_end();
     send_heap(heap);
