@@ -19,6 +19,7 @@ static constexpr int id_bandwidth = 0x1013;
 static constexpr int id_sd_timestamp = 0x3502;
 static constexpr int id_sd_data = 0x3507;
 static constexpr int id_sd_data_index = 0x3509;
+static constexpr int id_sd_flags = 0x3503;
 
 static spead2::flavour make_flavour()
 {
@@ -59,13 +60,18 @@ static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id, 
 }
 
 stats_collector::transmit_data::transmit_data(const session_config &config)
-    : power_spectrum(config.channels), heap(make_flavour())
+    : heap(make_flavour()),
+    power_spectrum(config.channels),
+    flags(config.channels)
 {
     add_descriptor(heap, id_sd_data, "sd_data", "Power spectrum",
                    {config.channels, 1, 2}, "f4");
     heap.add_item(id_sd_data,
                   power_spectrum.data(),
                   power_spectrum.size() * sizeof(power_spectrum[0]), false);
+    add_descriptor(heap, id_sd_flags, "sd_flags", "8bit packed flags for each data point.",
+                   {config.channels, 1}, "u1");
+    heap.add_item(id_sd_flags, flags.data(), flags.size() * sizeof(flags[0]), false);
     add_descriptor(heap, id_sd_timestamp, "sd_timestamp", "Timestamp of this sd frame in centiseconds since epoch",
                    {}, "u8");
     heap.add_item(id_sd_timestamp, &timestamp, sizeof(timestamp), true);
@@ -158,8 +164,17 @@ void stats_collector::add(const slice &s)
 void stats_collector::transmit()
 {
     int channels = power_spectrum.size();
+    std::fill(data.flags.begin(), data.flags.end(), 0);
     for (int i = 0; i < channels; i++)
-        data.power_spectrum[i] = float(power_spectrum[i]) / power_spectrum_weight[i];
+    {
+        if (power_spectrum_weight[i] != 0)
+            data.power_spectrum[i] = float(power_spectrum[i]) / power_spectrum_weight[i];
+        else
+        {
+            data.power_spectrum[i] = 0;
+            data.flags[i] = data_lost;
+        }
+    }
     double timestamp_unix = sync_time + (start_timestamp + 0.5 * interval) / scale_factor_timestamp;
     // Convert to centiseconds, since that's what signal display uses
     data.timestamp = std::uint64_t(std::round(timestamp_unix * 100.0));

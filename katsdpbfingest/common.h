@@ -12,6 +12,8 @@
 // Forward-declare to avoid sucking in pybind11.h
 namespace pybind11 { class object; }
 
+static constexpr std::uint8_t data_lost = 1 << 3;
+
 void log_message(spead2::log_level level, const std::string &msg);
 void set_logger(pybind11::object logger);
 void clear_logger();

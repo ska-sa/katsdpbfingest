@@ -28,6 +28,9 @@ from katsdpbfingest import bf_ingest_server, _bf_ingest
 from ..utils import Range
 
 
+DATA_LOST = 1 << 3
+
+
 class TestSession(object):
     def setup(self):
         # To avoid collisions when running tests in parallel on a single host,
@@ -132,11 +135,13 @@ class TestCaptureServer(object):
     def _test_stream(self, end):
         n_heaps = 25              # number of heaps in time
         n_spectra = self.spectra_per_heap * n_heaps
-        # Pick some heaps to drop, including an entire slice
+        # Pick some heaps to drop, including an entire slice and
+        # an entire channel for one stats dump
         drop = np.zeros((self.n_bengs, n_heaps), np.bool_)
         drop[:, 4] = True
         drop[2, 9] = True
         drop[7, 24] = True
+        drop[10, 15:20] = True
 
         # Start a receiver to get the signal display stream.
         # It need a deep queue because we don't service it while it is
@@ -251,22 +256,37 @@ class TestCaptureServer(object):
         spectra_per_stats = self.heaps_per_stats * self.spectra_per_heap
         for heap in heaps[1:-1]:
             updated = ig.update(heap)
-            assert_in('sd_data', updated)
             value = updated['sd_data'].value
+            flags = updated['sd_flags'].value
+            timestamp = updated['sd_timestamp'].value
+
+            # Check types and shapes
             assert_equal((len(self.args.channels), 1, 2), value.shape)
             assert_equal(np.float32, value.dtype)
-            # Should be real only
-            np.testing.assert_equal(0, value[..., 1])
-            # Check calculation
+            assert_equal((len(self.args.channels), 1), flags.shape)
+            assert_equal(np.uint8, flags.dtype)
+
+            # Check calculations
+            expected_ts_unix = (spectrum + 0.5 * spectra_per_stats) * self.ticks_between_spectra \
+                    / self.adc_sample_rate + 111111111.0
+            np.testing.assert_allclose(expected_ts_unix * 100.0, timestamp)
+
             index = np.s_[:, spectrum : spectrum + spectra_per_stats]
             frame_data = expected_data[index]
             frame_weight = expected_weight[index]
+            weight_sum = np.sum(frame_weight, axis=1)
             power = np.sum(frame_data.astype(np.float64)**2, axis=2) # Sum real+imag
             # Average over time. Can't use np.average because it complains if
             # weights sum to zero instead of giving a NaN.
             with np.errstate(divide='ignore', invalid='ignore'):
-                power = np.sum(power * frame_weight, axis=1) / np.sum(frame_weight, axis=1)
+                power = np.sum(power * frame_weight, axis=1) / weight_sum
+            power = np.where(weight_sum, power, 0)
             np.testing.assert_allclose(power, value[:, 0, 0])
+            # Should be real only
+            np.testing.assert_equal(0, value[..., 1])
+            expected_flags = np.where(weight_sum, 0, DATA_LOST)
+            np.testing.assert_equal(expected_flags, flags[:, 0])
+
             spectrum += spectra_per_stats
 
     def test_stream_end(self):

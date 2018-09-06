@@ -125,8 +125,6 @@ void hdf5_timestamps_writer::add(std::uint64_t timestamp)
         flush();
 }
 
-static constexpr std::uint8_t data_lost = 1 << 3;
-
 flags_chunk::flags_chunk(std::size_t size)
     : data(make_aligned<std::uint8_t>(size))
 {

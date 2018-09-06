@@ -26,6 +26,7 @@ private:
          * imaginary part is all zeros.
          */
         std::vector<std::complex<float>> power_spectrum;
+        std::vector<std::uint8_t> flags;  // just data_lost if all samples lost
         std::uint64_t timestamp;  // centre, in centiseconds since Unix epoch
 
         transmit_data(const session_config &config);
