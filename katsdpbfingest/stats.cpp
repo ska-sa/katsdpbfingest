@@ -3,6 +3,8 @@
 #include <cassert>
 #include <utility>
 #include <sstream>
+#include <algorithm>
+#include <type_traits>
 #include <spead2/send_stream.h>
 #include <spead2/send_udp.h>
 #include <spead2/common_endian.h>
@@ -46,6 +48,39 @@ static void add_descriptor(spead2::send::heap &heap,
     heap.add_descriptor(d);
 }
 
+template<typename T,
+         typename SFINAE = typename std::enable_if<std::is_trivially_copyable<T>::value>::type>
+static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id, const T &value)
+{
+    std::unique_ptr<std::uint8_t[]> dup(new std::uint8_t[sizeof(T)]);
+    std::memcpy(dup.get(), &value, sizeof(T));
+    heap.add_item(id, dup.get(), sizeof(T), true);
+    heap.add_pointer(std::move(dup));
+}
+
+stats_collector::transmit_data::transmit_data(const session_config &config)
+    : power_spectrum(config.channels), heap(make_flavour())
+{
+    add_descriptor(heap, id_sd_data, "sd_data", "Power spectrum",
+                   {config.channels, 1, 2}, "f4");
+    heap.add_item(id_sd_data,
+                  power_spectrum.data(),
+                  power_spectrum.size() * sizeof(power_spectrum[0]), false);
+    add_descriptor(heap, id_sd_timestamp, "sd_timestamp", "Timestamp of this sd frame in centiseconds since epoch",
+                   {}, "u8");
+    heap.add_item(id_sd_timestamp, &timestamp, sizeof(timestamp), true);
+
+    // TODO: more fields
+    add_descriptor(heap, id_n_chans, "n_chans", "Number of channels", {}, "u4");
+    add_constant(heap, id_n_chans, std::uint32_t(config.channels));
+    add_descriptor(heap, id_bandwidth, "bandwidth", "The analogue bandwidth of the digitally processed signal, in Hz.",
+                   {}, "f4");
+    add_constant(heap, id_bandwidth, config.bandwidth);
+    add_descriptor(heap, id_center_freq, "center_freq", "The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.",
+                   {}, "f4");
+    add_constant(heap, id_center_freq, config.center_freq);
+}
+
 void stats_collector::send_heap(const spead2::send::heap &heap)
 {
     auto handler = [](const boost::system::error_code &ec,
@@ -62,13 +97,14 @@ void stats_collector::send_heap(const spead2::send::heap &heap)
 stats_collector::stats_collector(const session_config &config)
     : power_spectrum(config.channels),
     power_spectrum_weight(config.channels),
-    power_spectrum_send(config.channels),
+    data(config),
     spectra_per_heap(config.spectra_per_heap),
+    sync_time(config.sync_time),
+    scale_factor_timestamp(config.scale_factor_timestamp),
     stream(io_service, config.stats_endpoint,
            spead2::send::stream_config(8872),
            spead2::send::udp_stream::default_buffer_size,
-           1, config.stats_interface_address),
-    data_heap(make_flavour())
+           1, config.stats_interface_address)
 {
     assert(spectra_per_heap < 32768); // otherwise overflows can occur
     spead2::send::heap start_heap;
@@ -80,13 +116,6 @@ stats_collector::stats_collector(const session_config &config)
     interval = interval / interval_align * interval_align;
     if (interval <= 0)
         interval = interval_align;
-
-    // TODO: all the other fields
-    add_descriptor(data_heap, id_sd_data, "sd_data", "Power spectrum",
-                   {config.channels, 1, 2}, "f4");
-    data_heap.add_item(id_sd_data,
-                       power_spectrum_send.data(),
-                       power_spectrum_send.size() * sizeof(power_spectrum_send[0]), false);
 }
 
 void stats_collector::add(const slice &s)
@@ -130,9 +159,12 @@ void stats_collector::transmit()
 {
     int channels = power_spectrum.size();
     for (int i = 0; i < channels; i++)
-        power_spectrum_send[i] = float(power_spectrum[i]) / power_spectrum_weight[i];
+        data.power_spectrum[i] = float(power_spectrum[i]) / power_spectrum_weight[i];
+    double timestamp_unix = sync_time + (start_timestamp + 0.5 * interval) / scale_factor_timestamp;
+    // Convert to centiseconds, since that's what signal display uses
+    data.timestamp = std::uint64_t(std::round(timestamp_unix * 100.0));
 
-    send_heap(data_heap);
+    send_heap(data.heap);
 
     std::fill(power_spectrum.begin(), power_spectrum.end(), 0);
     std::fill(power_spectrum_weight.begin(), power_spectrum_weight.end(), 0);
