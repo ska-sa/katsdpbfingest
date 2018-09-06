@@ -33,9 +33,7 @@ private:
     void transmit();
 
 public:
-    stats_collector(const boost::asio::ip::udp::endpoint &endpoint,
-                    const boost::asio::ip::address &interface_address,
-                    int channels, int spectra_per_heap);
+    stats_collector(const session_config &config);
     ~stats_collector();
 
     void add(const slice &s);

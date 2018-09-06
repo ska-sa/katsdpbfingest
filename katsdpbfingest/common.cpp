@@ -64,3 +64,24 @@ void session_config::set_stats_interface_address(const std::string &address)
 {
     stats_interface_address = boost::asio::ip::address_v4::from_string(address);
 }
+
+const session_config &session_config::validate() const
+{
+    if (channels <= 0)
+        throw std::invalid_argument("channels <= 0");
+    if (channels_per_heap <= 0)
+        throw std::invalid_argument("channels_per_heap <= 0");
+    if (spectra_per_heap <= 0)
+        throw std::invalid_argument("spectra_per_heap <= 0");
+    if (ticks_between_spectra <= 0)
+        throw std::invalid_argument("ticks_between_spectra <= 0");
+    if (sync_time <= 0)
+        throw std::invalid_argument("sync_time <= 0");
+    if (bandwidth <= 0)
+        throw std::invalid_argument("bandwidth <= 0");
+    if (center_freq <= 0)
+        throw std::invalid_argument("center_freq <= 0");
+    if (scale_factor_timestamp <= 0)
+        throw std::invalid_argument("scale_factor_timestamp <= 0");
+    return *this;
+}

@@ -51,6 +51,10 @@ class TestSession(object):
         config.channels_per_heap = 256
         config.spectra_per_heap = 256
         config.ticks_between_spectra = 8192
+        config.sync_time = 1111111111.0
+        config.bandwidth = 856e6
+        config.center_freq = 1284e6
+        config.scale_factor_timestamp = 1712e6
         _bf_ingest.Session(config)
 
 
@@ -70,6 +74,8 @@ class TestCaptureServer(object):
             '239.102.2.0+7:{}'.format(self.port))
         self.n_bengs = 16
         self.ticks_between_spectra = 8192
+        self.adc_sample_rate = 1712000000.0
+        self.heaps_per_stats = 5
         self.channels_per_heap = self.n_channels // self.n_bengs
         attrs = {
             'i0_tied_array_channelised_voltage_0x_n_chans': self.n_channels,
@@ -77,10 +83,12 @@ class TestCaptureServer(object):
             'i0_tied_array_channelised_voltage_0x_spectra_per_heap': self.spectra_per_heap,
             'i0_tied_array_channelised_voltage_0x_src_streams': [
                 'i0_antenna_channelised_voltage'],
+            'i0_tied_array_channelised_voltage_0x_bandwidth': self.adc_sample_rate / 2,
+            'i0_tied_array_channelised_voltage_0x_center_freq': 3 * self.adc_sample_rate / 2,
             'i0_antenna_channelised_voltage_ticks_between_spectra': self.ticks_between_spectra,
             'i0_antenna_channelised_voltage_instrument_dev_name': 'i0',
-            'i0_sync_time': 123456789.0,
-            'i0_scale_factor_timestamp': 1712000000.0
+            'i0_sync_time': 111111111.0,
+            'i0_scale_factor_timestamp': self.adc_sample_rate
         }
         telstate = katsdptelstate.TelescopeState()
         for key, value in attrs.items():
@@ -96,6 +104,8 @@ class TestCaptureServer(object):
             interface='lo',
             telstate=telstate,
             stats=endpoint.Endpoint('239.102.3.0', 7149),
+            stats_int_time=self.heaps_per_stats * self.ticks_between_spectra * self.spectra_per_heap
+                / self.adc_sample_rate,
             stats_interface='lo')
         self.loop = trollius.get_event_loop()
 
@@ -232,15 +242,14 @@ class TestCaptureServer(object):
         # Validate the signal display stream
         rx.stop()
         heaps = list(rx)
-        # - 1 heap because we don't get an update for the entirely dropped dump
-        assert_equal(n_heaps + 2 - 1, len(heaps))
+        # Note: would need updating if n_heaps is not a multiple of heaps_per_stats
+        assert_equal(n_heaps // self.heaps_per_stats + 2, len(heaps))
         assert_true(heaps[0].is_start_of_stream())
         assert_true(heaps[-1].is_end_of_stream())
         ig = spead2.ItemGroup()
         spectrum = 0
+        spectra_per_stats = self.heaps_per_stats * self.spectra_per_heap
         for heap in heaps[1:-1]:
-            while np.all(drop[:, spectrum // self.spectra_per_heap]):
-                spectrum += 1
             updated = ig.update(heap)
             assert_in('sd_data', updated)
             value = updated['sd_data'].value
@@ -249,7 +258,7 @@ class TestCaptureServer(object):
             # Should be real only
             np.testing.assert_equal(0, value[..., 1])
             # Check calculation
-            index = np.s_[:, spectrum : spectrum + self.spectra_per_heap]
+            index = np.s_[:, spectrum : spectrum + spectra_per_stats]
             frame_data = expected_data[index]
             frame_weight = expected_weight[index]
             power = np.sum(frame_data.astype(np.float64)**2, axis=2) # Sum real+imag
@@ -258,7 +267,7 @@ class TestCaptureServer(object):
             with np.errstate(divide='ignore', invalid='ignore'):
                 power = np.sum(power * frame_weight, axis=1) / np.sum(frame_weight, axis=1)
             np.testing.assert_allclose(power, value[:, 0, 0])
-            spectrum += self.spectra_per_heap
+            spectrum += spectra_per_stats
 
     def test_stream_end(self):
         """Stream ends with an end-of-stream"""

@@ -59,26 +59,31 @@ void stats_collector::send_heap(const spead2::send::heap &heap)
     io_service.reset();
 }
 
-stats_collector::stats_collector(const boost::asio::ip::udp::endpoint &endpoint,
-                                 const boost::asio::ip::address &interface_address,
-                                 int channels, int spectra_per_heap)
-    : power_spectrum(channels), power_spectrum_weight(channels), power_spectrum_send(channels),
-    spectra_per_heap(spectra_per_heap),
-    stream(io_service, endpoint,
+stats_collector::stats_collector(const session_config &config)
+    : power_spectrum(config.channels),
+    power_spectrum_weight(config.channels),
+    power_spectrum_send(config.channels),
+    spectra_per_heap(config.spectra_per_heap),
+    stream(io_service, config.stats_endpoint,
            spead2::send::stream_config(8872),
            spead2::send::udp_stream::default_buffer_size,
-           1, interface_address),
+           1, config.stats_interface_address),
     data_heap(make_flavour())
 {
     assert(spectra_per_heap < 32768); // otherwise overflows can occur
     spead2::send::heap start_heap;
     start_heap.add_start();
     send_heap(start_heap);
-    add_descriptor(data_heap, id_sd_data, "sd_data", "Power spectrum",
-                   {channels, 1, 2}, "f4");
-    interval = 1;  // TODO: base on scale_factor_timestamp
+
+    auto interval_align = std::int64_t(config.spectra_per_heap) * config.ticks_between_spectra;
+    interval = std::int64_t(std::round(config.stats_int_time * config.scale_factor_timestamp));
+    interval = interval / interval_align * interval_align;
+    if (interval <= 0)
+        interval = interval_align;
 
     // TODO: all the other fields
+    add_descriptor(data_heap, id_sd_data, "sd_data", "Power spectrum",
+                   {config.channels, 1, 2}, "f4");
     data_heap.add_item(id_sd_data,
                        power_spectrum_send.data(),
                        power_spectrum_send.size() * sizeof(power_spectrum_send[0]), false);

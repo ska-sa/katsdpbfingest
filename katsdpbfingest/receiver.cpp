@@ -340,15 +340,6 @@ receiver::receiver(const session_config &config)
     ring(config.ring_slots),
     free_ring(window_size + config.ring_slots + 1)
 {
-    if (channels <= 0)
-        throw std::invalid_argument("channels <= 0");
-    if (channels_per_heap <= 0)
-        throw std::invalid_argument("channels_per_heap <= 0");
-    if (spectra_per_heap <= 0)
-        throw std::invalid_argument("spectra_per_heap <= 0");
-    if (ticks_between_spectra <= 0)
-        throw std::invalid_argument("ticks_between_spectra <= 0");
-
     py::gil_scoped_release gil;
 
     try

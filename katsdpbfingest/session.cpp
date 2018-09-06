@@ -18,7 +18,7 @@
 namespace py = pybind11;
 
 session::session(const session_config &config) :
-    config(config),
+    config(config.validate()),
     recv(config),
     run_future(std::async(std::launch::async, &session::run, this))
 {
@@ -81,8 +81,7 @@ void session::run_impl()
     std::unique_ptr<stats_collector> stats;
     if (!config.stats_endpoint.address().is_unspecified())
     {
-        stats.reset(new stats_collector(config.stats_endpoint, config.stats_interface_address,
-                                        channels, spectra_per_heap));
+        stats.reset(new stats_collector(config));
     }
 
     hdf5_writer w(config.filename, config.direct,

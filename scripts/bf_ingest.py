@@ -63,6 +63,9 @@ def main():
         '--stats', type=katsdptelstate.endpoint.endpoint_parser(7149), metavar='ENDPOINT',
         help='Send statistics to a signal display server at this address')
     parser.add_argument(
+        '--stats-int-time', type=float, default=1.0, metavar='SECONDS',
+        help='Interval between sending statistics to the signal displays')
+    parser.add_argument(
         '--stats-interface', type=str,
         help='Network interface for signal display stream')
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')

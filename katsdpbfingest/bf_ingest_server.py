@@ -30,23 +30,25 @@ import katsdpbfingest
 _logger = logging.getLogger(__name__)
 
 
-def _config_from_telstate(args, config, name_map):
+def _config_from_telstate(telstate, config, attr_name, telstate_name=None):
     """Populate a SessionConfig from telstate entries.
 
     Parameters
     ----------
-    args : :class:`argparse.Namespace`
-        Command-line arguments
+    telstate : :class:`katsdptelstate.TelescopeState`
+        Telescope state with views for the CBF stream
     config : :class:`katsdpbfingest._bf_ingest.SessionConfig`
         Configuration object to populate
-    name_map : dict
-        Mapping from attribute name in config to telstate name suffix
+    attr_name : str
+        Attribute name to set in `config`
+    telstate_name : str, optional
+        Name to look up in `telstate` (defaults to `attr_name`)
     """
-    telstate = utils.cbf_telstate_view(args.telstate, args.stream_name)
-    for attr_name, telstate_name in name_map.items():
-        value = telstate[telstate_name]
-        _logger.info('Setting %s to %s from telstate', attr_name, value)
-        setattr(config, attr_name, value)
+    if telstate_name is None:
+        telstate_name = attr_name
+    value = telstate[telstate_name]
+    _logger.info('Setting %s to %s from telstate', attr_name, value)
+    setattr(config, attr_name, value)
 
 
 def _create_session_config(args):
@@ -69,11 +71,15 @@ def _create_session_config(args):
         config.network_affinity = args.affinity[1]
     if args.direct_io:
         config.direct = True
-    _config_from_telstate(args, config, {
-        'ticks_between_spectra': 'ticks_between_spectra',
-        'channels': 'n_chans',
-        'channels_per_heap': 'n_chans_per_substream',
-        'spectra_per_heap': 'spectra_per_heap'})
+
+    # Load external config from telstate
+    telstate = utils.cbf_telstate_view(args.telstate, args.stream_name)
+    _config_from_telstate(telstate, config, 'channels', 'n_chans')
+    _config_from_telstate(telstate, config, 'channels_per_heap', 'n_chans_per_substream')
+    for name in ['ticks_between_spectra', 'spectra_per_heap', 'sync_time',
+                 'bandwidth', 'center_freq', 'scale_factor_timestamp']:
+        _config_from_telstate(telstate, config, name)
+
     # Check that the requested channel range is valid.
     all_channels = Range(0, config.channels)
     if args.channels is None:
@@ -86,14 +92,20 @@ def _create_session_config(args):
         raise ValueError(
             '--channels does not fit inside range {}'.format(all_channels))
 
-    endpoint_range = np.s_[args.channels.start // channels_per_endpoint:
-                           args.channels.stop // channels_per_endpoint]
+    # Update for selected channel range
+    channel_shift = (args.channels.start + args.channels.stop - config.channels) / 2
+    config.center_freq += channel_shift * config.bandwidth / config.channels
+    config.bandwidth = config.bandwidth * len(args.channels) / config.channels
     config.channels = len(args.channels)
     config.channel_offset = args.channels.start
+
+    endpoint_range = np.s_[args.channels.start // channels_per_endpoint:
+                           args.channels.stop // channels_per_endpoint]
     for endpoint in args.cbf_spead[endpoint_range]:
         config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
     if args.stats is not None:
         config.set_stats_endpoint(args.stats.host, args.stats.port)
+        config.stats_int_time = args.stats_int_time
         if args.stats_interface is not None:
             config.stats_interface_address = \
                 katsdpservices.get_interface_address(args.stats_interface)
