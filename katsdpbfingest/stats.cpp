@@ -92,10 +92,10 @@ stats_collector::transmit_data::transmit_data(const session_config &config)
     add_descriptor(heap, id_n_chans, "n_chans", "Number of channels", {}, "u4");
     add_constant(heap, id_n_chans, std::uint32_t(config.channels));
     add_descriptor(heap, id_bandwidth, "bandwidth", "The analogue bandwidth of the digitally processed signal, in Hz.",
-                   {}, "f4");
+                   {}, "f8");
     add_constant(heap, id_bandwidth, config.bandwidth);
     add_descriptor(heap, id_center_freq, "center_freq", "The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.",
-                   {}, "f4");
+                   {}, "f8");
     add_constant(heap, id_center_freq, config.center_freq);
 }
 
