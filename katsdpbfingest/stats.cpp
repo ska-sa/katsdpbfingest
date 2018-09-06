@@ -11,6 +11,18 @@
 #include "common.h"
 #include "stats.h"
 
+#define TARGET "default"
+#include "power.h"
+#undef TARGET
+
+#define TARGET "avx"
+#include "power.h"
+#undef TARGET
+
+#define TARGET "avx2"
+#include "power.h"
+#undef TARGET
+
 // Taken from https://docs.google.com/spreadsheets/d/1XojAI9O9pSSXN8vyb2T97Sd875YCWqie8NY8L02gA_I/edit#gid=0
 static constexpr int id_n_bls = 0x1008;
 static constexpr int id_n_chans = 0x1009;
@@ -145,17 +157,10 @@ void stats_collector::add(const slice &s)
         if (!s.present[heap])
             continue;
         int start_channel = heap * channels_per_heap;
-        // TODO: split out into function compiled for multiple instruction sets
         for (int channel = start_channel; channel < start_channel + channels_per_heap; channel++)
         {
             const int8_t *cdata = data + channel * spectra_per_heap * 2;
-            uint32_t accum = 0;
-            for (int i = 0; i < spectra_per_heap * 2; i++)
-            {
-                int16_t v = cdata[i];
-                accum += v * v;
-            }
-            power_spectrum[channel] += accum;
+            power_spectrum[channel] += power_sum(spectra_per_heap * 2, cdata);
             power_spectrum_weight[channel] += spectra_per_heap;
         }
     }
