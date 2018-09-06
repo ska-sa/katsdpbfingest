@@ -19,7 +19,7 @@ import spead2
 import spead2.recv
 import spead2.send
 
-from nose.tools import assert_equal, assert_true, assert_false
+from nose.tools import assert_equal, assert_true, assert_false, assert_in
 
 import katsdptelstate
 from katsdptelstate import endpoint
@@ -187,20 +187,24 @@ class TestCaptureServer(object):
         h5file = h5py.File(filename, 'r')
         with contextlib.closing(h5file):
             bf_raw = h5file['/Data/bf_raw']
-            expected = np.zeros((self.n_channels, n_spectra, 2), np.int8)
+            expected_data = np.zeros((self.n_channels, n_spectra, 2), np.int8)
+            expected_weight = np.ones((self.n_channels, n_spectra), np.int8)
             for channel in range(self.n_channels):
-                expected[channel, :, 0] = channel % 255 - 128
+                expected_data[channel, :, 0] = channel % 255 - 128
             for t in range(n_spectra):
-                expected[:, t, 1] = t % 255 - 128
+                expected_data[:, t, 1] = t % 255 - 128
             for i in range(self.n_bengs):
                 for j in range(n_heaps):
                     if drop[i, j]:
                         channel0 = i * self.channels_per_heap
                         spectrum0 = j * self.spectra_per_heap
-                        expected[channel0 : channel0 + self.channels_per_heap,
-                                 spectrum0 : spectrum0 + self.spectra_per_heap, :] = 0
-            expected = expected[self.args.channels.asslice()]
-            np.testing.assert_equal(expected, bf_raw)
+                        index = np.s_[channel0 : channel0 + self.channels_per_heap,
+                                      spectrum0 : spectrum0 + self.spectra_per_heap, ...]
+                        expected_data[index] = 0
+                        expected_weight[index] = 0
+            expected_data = expected_data[self.args.channels.asslice()]
+            expected_weight = expected_weight[self.args.channels.asslice()]
+            np.testing.assert_equal(expected_data, bf_raw)
 
             timestamps = h5file['/Data/timestamps']
             expected = 1234567890 \
@@ -228,11 +232,33 @@ class TestCaptureServer(object):
         # Validate the signal display stream
         rx.stop()
         heaps = list(rx)
+        # - 1 heap because we don't get an update for the entirely dropped dump
+        assert_equal(n_heaps + 2 - 1, len(heaps))
         assert_true(heaps[0].is_start_of_stream())
         assert_true(heaps[-1].is_end_of_stream())
         ig = spead2.ItemGroup()
+        spectrum = 0
         for heap in heaps[1:-1]:
+            while np.all(drop[:, spectrum // self.spectra_per_heap]):
+                spectrum += 1
             updated = ig.update(heap)
+            assert_in('sd_data', updated)
+            value = updated['sd_data'].value
+            assert_equal((len(self.args.channels), 1, 2), value.shape)
+            assert_equal(np.float32, value.dtype)
+            # Should be real only
+            np.testing.assert_equal(0, value[..., 1])
+            # Check calculation
+            index = np.s_[:, spectrum : spectrum + self.spectra_per_heap]
+            frame_data = expected_data[index]
+            frame_weight = expected_weight[index]
+            power = np.sum(frame_data.astype(np.float64)**2, axis=2) # Sum real+imag
+            # Average over time. Can't use np.average because it complains if
+            # weights sum to zero instead of giving a NaN.
+            with np.errstate(divide='ignore', invalid='ignore'):
+                power = np.sum(power * frame_weight, axis=1) / np.sum(frame_weight, axis=1)
+            np.testing.assert_allclose(power, value[:, 0, 0])
+            spectrum += self.spectra_per_heap
 
     def test_stream_end(self):
         """Stream ends with an end-of-stream"""
