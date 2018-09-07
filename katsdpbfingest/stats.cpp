@@ -50,14 +50,14 @@ static spead2::flavour make_flavour()
 
 static void add_descriptor(spead2::send::heap &heap,
                            spead2::s_item_pointer_t id,
-                           std::string name, std::string description,
+                           const std::string &name, const std::string &description,
                            const std::vector<int> &shape,
-                           std::string dtype)
+                           const std::string &dtype)
 {
     spead2::descriptor d;
     d.id = id;
-    d.name = std::move(name);
-    d.description = std::move(description);
+    d.name = name;
+    d.description = description;
     std::ostringstream numpy_header;
     numpy_header << "{'shape': (";
     for (auto s : shape)
