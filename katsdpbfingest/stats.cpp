@@ -5,6 +5,7 @@
 #include <sstream>
 #include <algorithm>
 #include <type_traits>
+#include <iterator>
 #include <spead2/send_stream.h>
 #include <spead2/send_udp.h>
 #include <spead2/common_endian.h>
@@ -28,6 +29,7 @@ static constexpr int id_n_bls = 0x1008;
 static constexpr int id_n_chans = 0x1009;
 static constexpr int id_center_freq = 0x1011;
 static constexpr int id_bandwidth = 0x1013;
+static constexpr int id_bls_ordering = 0x100C;
 static constexpr int id_sd_timestamp = 0x3502;
 static constexpr int id_sd_data = 0x3507;
 static constexpr int id_sd_data_index = 0x3509;
@@ -71,11 +73,30 @@ static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id, 
     heap.add_pointer(std::move(dup));
 }
 
+static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id,
+                         const std::string &value)
+{
+    /* This code is written to handle arbitrary containers, but the function
+     * isn't templated for them because the required SFINAE checks to ensure
+     * that it is safe become very messy.
+     */
+    auto first = std::begin(value);
+    auto last = std::end(value);
+    auto n = last - first;
+    using T = std::iterator_traits<decltype(first)>::value_type;
+    std::unique_ptr<std::uint8_t[]> dup(new std::uint8_t[sizeof(T) * n]);
+    std::uninitialized_copy(first, last, reinterpret_cast<T *>(dup.get()));
+    heap.add_item(id, dup.get(), sizeof(T) * n, false);
+    heap.add_pointer(std::move(dup));
+}
+
 stats_collector::transmit_data::transmit_data(const session_config &config)
     : heap(make_flavour()),
     power_spectrum(config.channels),
     flags(config.channels)
 {
+    using namespace std::literals;
+
     add_descriptor(heap, id_sd_data, "sd_data", "Power spectrum",
                    {config.channels, 1, 2}, "f4");
     heap.add_item(id_sd_data,
@@ -97,6 +118,12 @@ stats_collector::transmit_data::transmit_data(const session_config &config)
     add_descriptor(heap, id_center_freq, "center_freq", "The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.",
                    {}, "f8");
     add_constant(heap, id_center_freq, config.center_freq);
+    add_descriptor(heap, id_bls_ordering, "bls_ordering", "Baseline output ordering.",
+                   {1, 2}, "S5");  // Must match the chosen input name
+    add_constant(heap, id_bls_ordering, "powerpower"s);
+    add_descriptor(heap, id_sd_data_index, "sd_data_index", "Indices for transmitted sd_data.",
+                   {1}, "u4");
+    add_constant<std::uint32_t>(heap, id_sd_data_index, 0);
 }
 
 void stats_collector::send_heap(const spead2::send::heap &heap)
