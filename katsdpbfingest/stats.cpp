@@ -98,6 +98,19 @@ static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id,
     heap.add_pointer(std::move(dup));
 }
 
+template<typename T>
+static void add_zeros(spead2::send::heap &heap, spead2::s_item_pointer_t id,
+                      const std::string &name,
+                      const std::vector<int> &shape,
+                      const std::string &dtype)
+{
+    std::size_t n = 1;
+    for (int s : shape)
+        n *= s;
+    add_descriptor(heap, id, name, "Dummy item", shape, dtype);
+    add_constant(heap, id, std::string(n * sizeof(T), '\0'));
+}
+
 stats_collector::transmit_data::transmit_data(const session_config &config)
     : heap(make_flavour()),
     power_spectrum(config.channels),
@@ -132,7 +145,24 @@ stats_collector::transmit_data::transmit_data(const session_config &config)
     add_constant(heap, id_bls_ordering, "m999hm999h"s);
     add_descriptor(heap, id_sd_data_index, "sd_data_index", "Indices for transmitted sd_data.",
                    {1}, "u4");
-    add_constant<std::uint32_t>(heap, id_sd_data_index, 0);
+    add_constant(heap, id_sd_data_index, std::uint32_t(0));
+
+    // TODO: fields below here are just for testing against a correlator signal
+    // display server, and should mostly be removed.
+    add_descriptor(heap, id_sd_blmx_n_chans, "sd_blmx_n_chans", "Dummy item", {}, "u4");
+    add_constant(heap, id_sd_blmx_n_chans, std::uint32_t(config.channels));
+    add_descriptor(heap, id_sd_blmxdata, "sd_blmxdata", "Dummy item", {config.channels, 1, 2}, "f4");
+    heap.add_item(id_sd_blmxdata,
+                  power_spectrum.data(),
+                  power_spectrum.size() * sizeof(power_spectrum[0]), false);
+    add_descriptor(heap, id_sd_blmxflags, "sd_blmxflags", "Dummy item", {config.channels, 1}, "u1");
+    heap.add_item(id_sd_blmxflags, flags.data(), flags.size() * sizeof(flags[0]), false);
+    add_zeros<float>(heap, id_sd_flag_fraction, "sd_flag_fraction", {1, 8}, "f4");
+    add_zeros<float>(heap, id_sd_timeseries, "sd_timeseries", {1, 2}, "f4");
+    add_zeros<float>(heap, id_sd_timeseriesabs, "sd_timeseriesabs", {1}, "f4");
+    add_zeros<float>(heap, id_sd_percspectrum, "sd_percspectrum", {config.channels, 40}, "f4");
+    add_zeros<std::uint8_t>(heap, id_sd_percspectrumflags, "sd_percspectrumflags",
+                            {config.channels, 40}, "u1");
 }
 
 void stats_collector::send_heap(const spead2::send::heap &heap)
