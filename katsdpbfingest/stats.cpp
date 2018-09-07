@@ -43,11 +43,18 @@ static constexpr int id_sd_blmx_n_chans = 0x350A;
 static constexpr int id_sd_flag_fraction = 0x350B;
 static constexpr int id_sd_timeseriesabs = 0x3510;
 
+/// Make SPEAD 64-48 flavour
 static spead2::flavour make_flavour()
 {
     return spead2::flavour(4, 64, 48);
 }
 
+/**
+ * Helper to add a descriptor to a heap with numpy-style descriptor.
+ *
+ * The @a dtype should not have an endianness indicator. It will be added by
+ * this function.
+ */
 static void add_descriptor(spead2::send::heap &heap,
                            spead2::s_item_pointer_t id,
                            const std::string &name, const std::string &description,
@@ -71,6 +78,12 @@ static void add_descriptor(spead2::send::heap &heap,
     heap.add_descriptor(d);
 }
 
+/**
+ * Add a value to a heap, copying the data.
+ *
+ * The heap takes ownership of the copied data, so it is not necessary for @a
+ * value to remain live after the call.
+ */
 template<typename T,
          typename SFINAE = typename std::enable_if<std::is_trivially_copyable<T>::value>::type>
 static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id, const T &value)
@@ -78,9 +91,14 @@ static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id, 
     std::unique_ptr<std::uint8_t[]> dup(new std::uint8_t[sizeof(T)]);
     std::memcpy(dup.get(), &value, sizeof(T));
     heap.add_item(id, dup.get(), sizeof(T), true);
-    heap.add_pointer(std::move(dup));
+    heap.add_pointer(std::move(dup)); // Give the heap ownership of the memory
 }
 
+/**
+ * Add a value to a heap, copying the data.
+ *
+ * This overload takes the value as a string.
+ */
 static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id,
                          const std::string &value)
 {
@@ -98,6 +116,13 @@ static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id,
     heap.add_pointer(std::move(dup));
 }
 
+/**
+ * Helper to call @ref add_descriptor and @ref add_constant with zeros.
+ *
+ * This is used just to fake up items that are currently expected by
+ * timeplot. It should be removed once timeplot supports beamformer signal
+ * displays.
+ */
 template<typename T>
 static void add_zeros(spead2::send::heap &heap, spead2::s_item_pointer_t id,
                       const std::string &name,
@@ -175,6 +200,7 @@ void stats_collector::send_heap(const spead2::send::heap &heap)
     };
     stream.async_send_heap(heap, handler);
     io_service.run();
+    // io_service will refuse to run again unless reset is called
     io_service.reset();
 }
 
@@ -195,6 +221,7 @@ stats_collector::stats_collector(const session_config &config)
     start_heap.add_start();
     send_heap(start_heap);
 
+    // Convert config.stats_int_time to timestamp units and round to whole heaps
     auto interval_align = std::int64_t(config.spectra_per_heap) * config.ticks_between_spectra;
     interval = std::int64_t(std::round(config.stats_int_time * config.scale_factor_timestamp));
     interval = interval / interval_align * interval_align;
@@ -214,6 +241,7 @@ void stats_collector::add(const slice &s)
         start_timestamp += (s.timestamp - start_timestamp) / interval * interval;
     }
 
+    // Update the statistics using the heaps in the slice
     int channels = power_spectrum.size();
     int heaps = s.present.size();
     int channels_per_heap = channels / heaps;
@@ -234,6 +262,7 @@ void stats_collector::add(const slice &s)
 
 void stats_collector::transmit()
 {
+    // Compute derived values
     int channels = power_spectrum.size();
     std::fill(data.flags.begin(), data.flags.end(), 0);
     for (int i = 0; i < channels; i++)
@@ -252,14 +281,18 @@ void stats_collector::transmit()
 
     send_heap(data.heap);
 
+    // Reset for the next interval
     std::fill(power_spectrum.begin(), power_spectrum.end(), 0);
     std::fill(power_spectrum_weight.begin(), power_spectrum_weight.end(), 0);
 }
 
 stats_collector::~stats_collector()
 {
+    // If start_timestamp != -1 then we received at least one heap, and from
+    // then on we will always have an interval in progress.
     if (start_timestamp != -1)
         transmit();
+    // Send stop heap
     spead2::send::heap heap;
     heap.add_end();
     send_heap(heap);
