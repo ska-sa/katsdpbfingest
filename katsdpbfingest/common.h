@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <experimental/optional>
 #include <boost/asio.hpp>
 #include <boost/format.hpp>
 #include <spead2/common_logging.h>
@@ -171,7 +172,7 @@ void window<T, Derived>::flush_all()
 
 struct session_config
 {
-    std::string filename;
+    std::experimental::optional<std::string> filename;
     std::vector<boost::asio::ip::udp::endpoint> endpoints;
     boost::asio::ip::address interface_address;
 

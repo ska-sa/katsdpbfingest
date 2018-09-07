@@ -55,7 +55,7 @@ def _create_session_config(args):
     """Creates a SessionConfig object for a :class:`CaptureServer`.
 
     Note that this function makes blocking calls to telstate. The returned
-    config has a blank filename.
+    config has no filename.
 
     Parameters
     ----------
@@ -130,7 +130,7 @@ class _CaptureSession(object):
 
     Attributes
     ----------
-    filename : :class:`str`
+    filename : :class:`str` or ``None``
         Filename of the HDF5 file written
     _telstate : :class:`katsdptelstate.TelescopeState`
         Telescope state interface, if any
@@ -180,7 +180,7 @@ class _CaptureSession(object):
         pool = concurrent.futures.ThreadPoolExecutor(1)
         try:
             yield From(self._loop.run_in_executor(pool, self._session.join))
-            if self._session.n_heaps > 0:
+            if self._session.n_heaps > 0 and self.filename is not None:
                 # Write the metadata to file
                 self._write_metadata()
             _logger.info('Capture complete, %d heaps, of which %d dropped',
@@ -206,8 +206,9 @@ class CaptureServer(object):
     Parameters
     ----------
     args : :class:`argparse.Namespace`
-        Command-line arguments. The following arguments are required. Refer to
-        the script for documentation of these options.
+        Command-line arguments. The following arguments are must be present, although
+        some of them can be ``None``. Refer to the script for documentation of
+        these options.
 
         - cbf_spead
         - file_base
@@ -215,6 +216,9 @@ class CaptureServer(object):
         - affinity
         - telstate
         - stream_name
+        - stats
+        - stats_int_time
+        - stats_interface
 
     loop : :class:`trollius.BaseEventLoop`
         IO Loop for running coroutines
@@ -246,20 +250,23 @@ class CaptureServer(object):
 
     @trollius.coroutine
     def start_capture(self, capture_block_id):
-        """Start capture to file, if not already in progress.
+        """Start capture, if not already in progress.
 
         This is a co-routine.
         """
         if self._capture is None:
-            basename = '{}_{}.h5'.format(capture_block_id, self._args.stream_name)
-            self._config.filename = os.path.join(self._args.file_base, basename)
+            if self._args.file_base is not None:
+                basename = '{}_{}.h5'.format(capture_block_id, self._args.stream_name)
+                self._config.filename = os.path.join(self._args.file_base, basename)
+            else:
+                self._config.filename = None
             self._capture = _CaptureSession(
                 self._config, self._args.telstate, self._args.stream_name, self._loop)
         raise Return(self._capture.filename)
 
     @trollius.coroutine
     def stop_capture(self):
-        """Stop capture to file, if currently running. This is a co-routine."""
+        """Stop capture, if currently running. This is a co-routine."""
         if self._capture is not None:
             capture = self._capture
             yield From(capture.stop())
@@ -309,10 +316,11 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
         """Start capture to file."""
         if self.capturing:
             raise tornado.gen.Return(('fail', 'already capturing'))
-        stat = os.statvfs(self._args.file_base)
-        if stat.f_bavail / stat.f_blocks < 0.05:
-            raise tornado.gen.Return(('fail', 'less than 5% disk space free on {}'.format(
-                os.path.abspath(self._args.file_base))))
+        if self._args.file_base is not None:
+            stat = os.statvfs(self._args.file_base)
+            if stat.f_bavail / stat.f_blocks < 0.05:
+                raise tornado.gen.Return(('fail', 'less than 5% disk space free on {}'.format(
+                    os.path.abspath(self._args.file_base))))
         yield self._start_capture(capture_block_id)
         raise tornado.gen.Return(('ok',))
 

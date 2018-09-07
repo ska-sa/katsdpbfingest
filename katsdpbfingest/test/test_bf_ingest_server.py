@@ -19,7 +19,7 @@ import spead2
 import spead2.recv
 import spead2.send
 
-from nose.tools import assert_equal, assert_true, assert_false
+from nose.tools import assert_equal, assert_true, assert_false, assert_is_none
 
 import katsdptelstate
 from katsdptelstate import endpoint
@@ -133,7 +133,7 @@ class TestCaptureServer(object):
         trollius.get_event_loop().run_until_complete(self._test_manual_stop_no_data())
 
     @trollius.coroutine
-    def _test_stream(self, end):
+    def _test_stream(self, end, write):
         n_heaps = 25              # number of heaps in time
         n_spectra = self.spectra_per_heap * n_heaps
         # Pick some heaps to drop, including an entire slice and
@@ -143,6 +143,8 @@ class TestCaptureServer(object):
         drop[2, 9] = True
         drop[7, 24] = True
         drop[10, 15:20] = True
+        if not write:
+            self.args.file_base = None
 
         # Start a receiver to get the signal display stream.
         # It need a deep queue because we don't service it while it is
@@ -199,51 +201,55 @@ class TestCaptureServer(object):
         # Shut down the session
         yield From(server.stop_capture())
 
+        expected_data = np.zeros((self.n_channels, n_spectra, 2), np.int8)
+        expected_weight = np.ones((self.n_channels, n_spectra), np.int8)
+        for channel in range(self.n_channels):
+            expected_data[channel, :, 0] = channel % 255 - 128
+        for t in range(n_spectra):
+            expected_data[:, t, 1] = t % 255 - 128
+        for i in range(self.n_bengs):
+            for j in range(n_heaps):
+                if drop[i, j]:
+                    channel0 = i * self.channels_per_heap
+                    spectrum0 = j * self.spectra_per_heap
+                    index = np.s_[channel0 : channel0 + self.channels_per_heap,
+                                  spectrum0 : spectrum0 + self.spectra_per_heap, ...]
+                    expected_data[index] = 0
+                    expected_weight[index] = 0
+        expected_data = expected_data[self.args.channels.asslice()]
+        expected_weight = expected_weight[self.args.channels.asslice()]
+
         # Validate the output
-        h5file = h5py.File(filename, 'r')
-        with contextlib.closing(h5file):
-            bf_raw = h5file['/Data/bf_raw']
-            expected_data = np.zeros((self.n_channels, n_spectra, 2), np.int8)
-            expected_weight = np.ones((self.n_channels, n_spectra), np.int8)
-            for channel in range(self.n_channels):
-                expected_data[channel, :, 0] = channel % 255 - 128
-            for t in range(n_spectra):
-                expected_data[:, t, 1] = t % 255 - 128
-            for i in range(self.n_bengs):
-                for j in range(n_heaps):
-                    if drop[i, j]:
-                        channel0 = i * self.channels_per_heap
-                        spectrum0 = j * self.spectra_per_heap
-                        index = np.s_[channel0 : channel0 + self.channels_per_heap,
-                                      spectrum0 : spectrum0 + self.spectra_per_heap, ...]
-                        expected_data[index] = 0
-                        expected_weight[index] = 0
-            expected_data = expected_data[self.args.channels.asslice()]
-            expected_weight = expected_weight[self.args.channels.asslice()]
-            np.testing.assert_equal(expected_data, bf_raw)
+        if write:
+            h5file = h5py.File(filename, 'r')
+            with contextlib.closing(h5file):
+                bf_raw = h5file['/Data/bf_raw']
+                np.testing.assert_equal(expected_data, bf_raw)
 
-            timestamps = h5file['/Data/timestamps']
-            expected = 1234567890 \
-                + self.ticks_between_spectra * np.arange(self.spectra_per_heap * n_heaps)
-            np.testing.assert_equal(expected, timestamps)
+                timestamps = h5file['/Data/timestamps']
+                expected = 1234567890 \
+                    + self.ticks_between_spectra * np.arange(self.spectra_per_heap * n_heaps)
+                np.testing.assert_equal(expected, timestamps)
 
-            captured_timestamps = h5file['/Data/captured_timestamps']
-            slice_drops = np.sum(drop, axis=0)
-            captured_slices = np.nonzero(slice_drops == 0)[0]
-            captured_spectra = captured_slices[:, np.newaxis] * self.spectra_per_heap + \
-                np.arange(self.spectra_per_heap)[np.newaxis, :]
-            expected = 1234567890 + self.ticks_between_spectra * captured_spectra.flatten()
-            np.testing.assert_equal(expected, captured_timestamps)
+                captured_timestamps = h5file['/Data/captured_timestamps']
+                slice_drops = np.sum(drop, axis=0)
+                captured_slices = np.nonzero(slice_drops == 0)[0]
+                captured_spectra = captured_slices[:, np.newaxis] * self.spectra_per_heap + \
+                    np.arange(self.spectra_per_heap)[np.newaxis, :]
+                expected = 1234567890 + self.ticks_between_spectra * captured_spectra.flatten()
+                np.testing.assert_equal(expected, captured_timestamps)
 
-            flags = h5file['/Data/flags']
-            expected = np.where(drop, 8, 0).astype(np.uint8)
-            expected = expected[self.args.channels.start // self.channels_per_heap :
-                                self.args.channels.stop // self.channels_per_heap]
-            np.testing.assert_equal(expected, flags)
+                flags = h5file['/Data/flags']
+                expected = np.where(drop, 8, 0).astype(np.uint8)
+                expected = expected[self.args.channels.start // self.channels_per_heap :
+                                    self.args.channels.stop // self.channels_per_heap]
+                np.testing.assert_equal(expected, flags)
 
-            data = h5file['/Data']
-            assert_equal('i0_tied_array_channelised_voltage_0x', data.attrs['stream_name'])
-            assert_equal(self.args.channels.start, data.attrs['channel_offset'])
+                data = h5file['/Data']
+                assert_equal('i0_tied_array_channelised_voltage_0x', data.attrs['stream_name'])
+                assert_equal(self.args.channels.start, data.attrs['channel_offset'])
+        else:
+            assert_is_none(filename)
 
         # Validate the signal display stream
         rx.stop()
@@ -292,8 +298,12 @@ class TestCaptureServer(object):
 
     def test_stream_end(self):
         """Stream ends with an end-of-stream"""
-        trollius.get_event_loop().run_until_complete(self._test_stream(True))
+        trollius.get_event_loop().run_until_complete(self._test_stream(True, True))
 
     def test_stream_no_end(self):
         """Stream ends with a stop request"""
-        trollius.get_event_loop().run_until_complete(self._test_stream(False))
+        trollius.get_event_loop().run_until_complete(self._test_stream(False, True))
+
+    def test_stream_no_write(self):
+        """Stream with only statistics, no output file"""
+        trollius.get_event_loop().run_until_complete(self._test_stream(True, False))

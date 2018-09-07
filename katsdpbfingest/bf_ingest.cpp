@@ -31,6 +31,7 @@
 #include <string>
 #include <functional>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include <spead2/common_logging.h>
 #include <spead2/py_common.h>
 #include "common.h"

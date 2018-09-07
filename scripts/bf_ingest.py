@@ -45,8 +45,8 @@ def main():
         '--log-level', '-l', type=str, metavar='LEVEL', default=None,
         help='log level')
     parser.add_argument(
-        '--file-base', default='.', type=str, metavar='DIR',
-        help='base directory into which to write HDF5 files')
+        '--file-base', type=str, metavar='DIR',
+        help='write HDF5 files in this directory if given')
     parser.add_argument(
         '--affinity', type=spead2.parse_range_list, metavar='CPU,CPU',
         help='List of CPUs to which to bind threads')
@@ -77,9 +77,11 @@ def main():
         parser.error('--telstate is required')
     if args.stream_name is None:
         parser.error('--stream-name is required')
+    if args.file_base is None and args.stats is None:
+        parser.error('At least one of --file-base and --stats must be given')
     if args.log_level is not None:
         logging.root.setLevel(args.log_level.upper())
-    if not os.access(args.file_base, os.W_OK):
+    if args.file_base is not None and not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)
         sys.exit(1)
     ioloop = AsyncIOMainLoop()

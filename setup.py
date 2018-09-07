@@ -71,7 +71,7 @@ extensions = [
         language='c++',
         include_dirs=['spead2/include', 'spead2/3rdparty/pybind11/include'] + hdf5['include_dirs'],
         define_macros=hdf5['define_macros'],
-        extra_compile_args=['-std=c++11', '-g0', '-O3', '-fvisibility=hidden'],
+        extra_compile_args=['-std=c++14', '-g0', '-O3', '-fvisibility=hidden'],
         library_dirs=hdf5['library_dirs'],
         # libgcc needs to be explicitly linked for multi-function versioning
         libraries=['boost_system', 'hdf5_cpp', 'gcc'] + hdf5['libraries']
