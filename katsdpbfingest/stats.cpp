@@ -128,7 +128,8 @@ stats_collector::transmit_data::transmit_data(const session_config &config)
     add_constant(heap, id_center_freq, config.center_freq);
     add_descriptor(heap, id_bls_ordering, "bls_ordering", "Baseline output ordering.",
                    {1, 2}, "S5");  // Must match the chosen input name
-    add_constant(heap, id_bls_ordering, "powerpower"s);
+    // TODO: use a proper name. The m999h is to fit the signal display's expectations
+    add_constant(heap, id_bls_ordering, "m999hm999h"s);
     add_descriptor(heap, id_sd_data_index, "sd_data_index", "Indices for transmitted sd_data.",
                    {1}, "u4");
     add_constant<std::uint32_t>(heap, id_sd_data_index, 0);
