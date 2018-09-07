@@ -30,10 +30,18 @@ static constexpr int id_n_chans = 0x1009;
 static constexpr int id_center_freq = 0x1011;
 static constexpr int id_bandwidth = 0x1013;
 static constexpr int id_bls_ordering = 0x100C;
+static constexpr int id_sd_data = 0x3501;
 static constexpr int id_sd_timestamp = 0x3502;
-static constexpr int id_sd_data = 0x3507;
-static constexpr int id_sd_data_index = 0x3509;
 static constexpr int id_sd_flags = 0x3503;
+static constexpr int id_sd_timeseries = 0x3504;
+static constexpr int id_sd_percspectrum = 0x3505;
+static constexpr int id_sd_percspectrumflags = 0x3506;
+static constexpr int id_sd_blmxdata = 0x3507;
+static constexpr int id_sd_blmxflags = 0x3508;
+static constexpr int id_sd_data_index = 0x3509;
+static constexpr int id_sd_blmx_n_chans = 0x350A;
+static constexpr int id_sd_flag_fraction = 0x350B;
+static constexpr int id_sd_timeseriesabs = 0x3510;
 
 static spead2::flavour make_flavour()
 {
