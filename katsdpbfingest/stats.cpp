@@ -4,6 +4,7 @@
 #include <utility>
 #include <sstream>
 #include <algorithm>
+#include <functional>
 #include <type_traits>
 #include <iterator>
 #include <spead2/send_stream.h>
@@ -13,15 +14,15 @@
 #include "stats.h"
 
 #define TARGET "default"
-#include "power.h"
+#include "stats_ops.h"
 #undef TARGET
 
 #define TARGET "avx"
-#include "power.h"
+#include "stats_ops.h"
 #undef TARGET
 
 #define TARGET "avx2"
-#include "power.h"
+#include "stats_ops.h"
 #undef TARGET
 
 // Taken from https://docs.google.com/spreadsheets/d/1XojAI9O9pSSXN8vyb2T97Sd875YCWqie8NY8L02gA_I/edit#gid=0
@@ -42,6 +43,8 @@ static constexpr int id_sd_data_index = 0x3509;
 static constexpr int id_sd_blmx_n_chans = 0x350A;
 static constexpr int id_sd_flag_fraction = 0x350B;
 static constexpr int id_sd_timeseriesabs = 0x3510;
+// TODO: I've made this up for testing, but it's not yet registered
+static constexpr int id_sd_saturated = 0x350C;
 
 /// Make SPEAD 64-48 flavour
 static spead2::flavour make_flavour()
@@ -117,6 +120,24 @@ static void add_constant(spead2::send::heap &heap, spead2::s_item_pointer_t id,
 }
 
 /**
+ * Helper to call @ref add_descriptor and add a variable vector item.
+ */
+template<typename T,
+         typename SFINAE = typename std::enable_if<std::is_trivially_copyable<T>::value>::type>
+static void add_vector(spead2::send::heap &heap, spead2::s_item_pointer_t id,
+                       const std::string &name, const std::string &description,
+                       const std::vector<int> &shape,
+                       const std::string &dtype,
+                       std::vector<T> &data)
+{
+    add_descriptor(heap, id, name, description, shape, dtype);
+    std::size_t expected_size = std::accumulate(shape.begin(), shape.end(), std::size_t(1),
+                                                std::multiplies<>());
+    assert(expected_size == data.size());
+    heap.add_item(id, data.data(), data.size() * sizeof(T), false);
+}
+
+/**
  * Helper to call @ref add_descriptor and @ref add_constant with zeros.
  *
  * This is used just to fake up items that are currently expected by
@@ -139,18 +160,17 @@ static void add_zeros(spead2::send::heap &heap, spead2::s_item_pointer_t id,
 stats_collector::transmit_data::transmit_data(const session_config &config)
     : heap(make_flavour()),
     power_spectrum(config.channels),
+    saturated(config.channels),
     flags(config.channels)
 {
     using namespace std::literals;
 
-    add_descriptor(heap, id_sd_data, "sd_data", "Power spectrum",
-                   {config.channels, 1, 2}, "f4");
-    heap.add_item(id_sd_data,
-                  power_spectrum.data(),
-                  power_spectrum.size() * sizeof(power_spectrum[0]), false);
-    add_descriptor(heap, id_sd_flags, "sd_flags", "8bit packed flags for each data point.",
-                   {config.channels, 1}, "u1");
-    heap.add_item(id_sd_flags, flags.data(), flags.size() * sizeof(flags[0]), false);
+    add_vector(heap, id_sd_data, "sd_data", "Power spectrum",
+               {config.channels, 1, 2}, "f4", power_spectrum);
+    add_vector(heap, id_sd_saturated, "sd_saturated", "Fraction of samples that saturated",
+               {config.channels}, "f4", saturated);
+    add_vector(heap, id_sd_flags, "sd_flags", "8bit packed flags for each data point.",
+               {config.channels, 1}, "u1", flags);
     add_descriptor(heap, id_sd_timestamp, "sd_timestamp", "Timestamp of this sd frame in centiseconds since epoch",
                    {}, "u8");
     heap.add_item(id_sd_timestamp, &timestamp, sizeof(timestamp), true);
@@ -206,7 +226,8 @@ void stats_collector::send_heap(const spead2::send::heap &heap)
 
 stats_collector::stats_collector(const session_config &config)
     : power_spectrum(config.channels),
-    power_spectrum_weight(config.channels),
+    saturated(config.channels),
+    weight(config.channels),
     data(config),
     spectra_per_heap(config.spectra_per_heap),
     sync_time(config.sync_time),
@@ -216,7 +237,13 @@ stats_collector::stats_collector(const session_config &config)
            spead2::send::udp_stream::default_buffer_size,
            1, config.stats_interface_address)
 {
-    assert(spectra_per_heap < 32768); // otherwise overflows can occur
+    /* spectra_per_heap is checked by session_config::validate, so this
+     * is just a sanity check. It's necessary to limit spectra_per_heap
+     * to avoid overflowing narrow integers during accumulation. If there
+     * is a future need for larger values it can be handled by splitting
+     * the accumulations into shorter pieces.
+     */
+    assert(spectra_per_heap < 32768);
     spead2::send::heap start_heap;
     start_heap.add_start();
     send_heap(start_heap);
@@ -254,8 +281,9 @@ void stats_collector::add(const slice &s)
         for (int channel = start_channel; channel < start_channel + channels_per_heap; channel++)
         {
             const int8_t *cdata = data + channel * spectra_per_heap * 2;
-            power_spectrum[channel] += power_sum(spectra_per_heap * 2, cdata);
-            power_spectrum_weight[channel] += spectra_per_heap;
+            power_spectrum[channel] += power_sum(spectra_per_heap, cdata);
+            saturated[channel] += count_saturated(spectra_per_heap, cdata);
+            weight[channel] += spectra_per_heap;
         }
     }
 }
@@ -267,11 +295,16 @@ void stats_collector::transmit()
     std::fill(data.flags.begin(), data.flags.end(), 0);
     for (int i = 0; i < channels; i++)
     {
-        if (power_spectrum_weight[i] != 0)
-            data.power_spectrum[i] = float(power_spectrum[i]) / power_spectrum_weight[i];
+        if (weight[i] != 0)
+        {
+            float w = 1.0f / weight[i];
+            data.power_spectrum[i] = power_spectrum[i] * w;
+            data.saturated[i] = saturated[i] * w;
+        }
         else
         {
             data.power_spectrum[i] = 0;
+            data.saturated[i] = 0;
             data.flags[i] = data_lost;
         }
     }
@@ -283,7 +316,8 @@ void stats_collector::transmit()
 
     // Reset for the next interval
     std::fill(power_spectrum.begin(), power_spectrum.end(), 0);
-    std::fill(power_spectrum_weight.begin(), power_spectrum_weight.end(), 0);
+    std::fill(saturated.begin(), saturated.end(), 0);
+    std::fill(weight.begin(), weight.end(), 0);
 }
 
 stats_collector::~stats_collector()

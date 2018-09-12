@@ -4,10 +4,10 @@
 #include <cstdint>
 #include <complex>
 #include <string>
+#include <vector>
 #include <spead2/send_stream.h>
 #include <spead2/send_udp.h>
 #include <boost/noncopyable.hpp>
-#include <vector>
 #include "common.h"
 
 /**
@@ -35,10 +35,11 @@ private:
     struct transmit_data : public boost::noncopyable
     {
         spead2::send::heap heap;
-        /** Ratio power_spectrum / power_spectrum_weight. The
+        /** Ratio power_spectrum / weight. The
          * imaginary part is all zeros.
          */
         std::vector<std::complex<float>> power_spectrum;
+        std::vector<float> saturated;     ///< Fraction of data saturated
         std::vector<std::uint8_t> flags;  ///< just data_lost if all samples lost
         std::uint64_t timestamp;  ///< centre, in centiseconds since Unix epoch
 
@@ -47,8 +48,10 @@ private:
 
     /// Accumulated power per channel
     std::vector<std::uint64_t> power_spectrum;
-    /// Number of samples in matching entry of power_spectrum
-    std::vector<std::uint64_t> power_spectrum_weight;
+    /// Accumulated number of saturated samples per channel
+    std::vector<float> saturated;
+    /// Number of valid samples collected
+    std::vector<std::uint64_t> weight;
     /// Persist allocation of data to send (only used transiently)
     transmit_data data;
 
