@@ -10,8 +10,8 @@ MAINTAINER Bruce Merry "bmerry@ska.ac.za"
 USER root
 
 WORKDIR /tmp
-ENV HDF5_VERSION=1.8.17
-RUN wget http://sdp-services.kat.ac.za/mirror/support.hdfgroup.org/ftp/HDF5/current/src/hdf5-$HDF5_VERSION.tar.bz2
+ENV HDF5_VERSION=1.10.3
+RUN wget "http://sdp-services.kat.ac.za/mirror/www.hdfgroup.org/package/source-bzip/index.html%3Fwpdmdl=12594" -O hdf5-$HDF5_VERSION.tar.bz2
 RUN tar -jxf hdf5-$HDF5_VERSION.tar.bz2
 WORKDIR /tmp/hdf5-$HDF5_VERSION
 RUN ./configure --prefix=/usr/local --enable-build-mode=production --enable-threadsafe \
