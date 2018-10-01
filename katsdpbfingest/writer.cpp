@@ -6,34 +6,27 @@
 #include "common.h"
 #include "writer.h"
 
-/**
- * Creates a dataset transfer property list that can be used for writing chunks
- * of size @a size. It is based on examining the code for H5DOwrite_chunk, but
- * doing it directly actually makes it easier to do things using the C++ API,
- * as well as avoiding the need to continually flip the flag on and off.
- */
-static H5::DSetMemXferPropList make_dxpl_direct(std::size_t size)
+// See write_direct below for explanation
+#if !H5_VERSION_GE(1, 10, 3)
+#include <H5DOpublic.h>
+#endif
+
+static void write_direct(
+    H5::DataSet &dataset, const hsize_t *offset, size_t data_size, const void *buf)
 {
-    hbool_t direct_write = true;
-    H5::DSetMemXferPropList dxpl;
-    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_FLAG_NAME, &direct_write);
-    // The size of this property changed somewhere between 1.8.11 and 1.8.17
-    std::size_t property_size = dxpl.getPropSize(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME);
-    if (property_size == sizeof(size))
-        dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME, &size);
-    else if (property_size == sizeof(std::uint32_t))
-    {
-        std::uint32_t size32 = size;
-        assert(size32 == size);
-        dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_DATASIZE_NAME, &size32);
-    }
-    return dxpl;
+#if H5_VERSION_GE(1, 10, 3)
+    // 1.10.3 moved this functionality from H5DO into the core
+    herr_t ret = H5Dwrite_chunk(dataset.getId(), H5P_DEFAULT, 0, offset, data_size, buf);
+#else
+    herr_t ret = H5DOwrite_chunk(dataset.getId(), H5P_DEFAULT, 0, offset, data_size, buf);
+#endif
+    if (ret < 0)
+        throw H5::DataSetIException("DataSet::write_chunk", "H5Dwrite_chunk failed");
 }
 
 hdf5_bf_raw_writer::hdf5_bf_raw_writer(
     H5::Group &parent, int channels, int spectra_per_heap, const char *name)
-    : channels(channels), spectra_per_heap(spectra_per_heap),
-    dxpl(make_dxpl_direct(std::size_t(channels) * spectra_per_heap * 2))
+    : channels(channels), spectra_per_heap(spectra_per_heap)
 {
     hsize_t dims[3] = {hsize_t(channels), 0, 2};
     hsize_t maxdims[3] = {hsize_t(channels), H5S_UNLIMITED, 2};
@@ -52,9 +45,7 @@ void hdf5_bf_raw_writer::add(const slice &s)
     hsize_t new_size[3] = {hsize_t(channels), end, 2};
     dataset.extend(new_size);
     const hsize_t offset[3] = {0, hsize_t(s.spectrum), 0};
-    const hsize_t *offset_ptr = offset;
-    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_OFFSET_NAME, &offset_ptr);
-    dataset.write(s.data.get(), H5::PredType::STD_I8BE, H5::DataSpace::ALL, H5::DataSpace::ALL, dxpl);
+    write_direct(dataset, offset, std::size_t(channels) * spectra_per_heap * 2, s.data.get());
 }
 
 constexpr hsize_t hdf5_timestamps_writer::chunk;
@@ -70,8 +61,7 @@ static void set_string_attribute(H5::H5Object &location, const std::string &name
 hdf5_timestamps_writer::hdf5_timestamps_writer(
     H5::Group &parent, int spectra_per_heap,
     std::uint64_t ticks_between_spectra, const char *name)
-    : dxpl(make_dxpl_direct(chunk * sizeof(std::uint64_t))),
-    spectra_per_heap(spectra_per_heap),
+    : spectra_per_heap(spectra_per_heap),
     ticks_between_spectra(ticks_between_spectra)
 {
     hsize_t dims[1] = {0};
@@ -100,15 +90,13 @@ void hdf5_timestamps_writer::flush()
     hsize_t new_size = n_written + n_buffer;
     dataset.extend(&new_size);
     const hsize_t offset[1] = {n_written};
-    const hsize_t *offset_ptr = offset;
-    dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_OFFSET_NAME, &offset_ptr);
     if (n_buffer < chunk)
     {
         // Pad extra space with zeros - shouldn't matter, but this case
         // only arises when closing the file so should be cheap
         std::memset(buffer.get() + n_buffer, 0, (chunk - n_buffer) * sizeof(std::uint64_t));
     }
-    dataset.write(buffer.get(), H5::PredType::NATIVE_UINT64, H5S_ALL, H5S_ALL, dxpl);
+    write_direct(dataset, offset, chunk * sizeof(std::uint64_t), buffer.get());
     n_written += n_buffer;
     n_buffer = 0;
 }
@@ -145,8 +133,7 @@ hdf5_flags_writer::hdf5_flags_writer(
     spectra_per_heap(spectra_per_heap),
     heaps_per_slice(heaps_per_slice),
     heaps_per_chunk(compute_chunk_size(heaps_per_slice)),
-    slices_per_chunk(heaps_per_chunk / heaps_per_slice),
-    dxpl(make_dxpl_direct(heaps_per_chunk))
+    slices_per_chunk(heaps_per_chunk / heaps_per_slice)
 {
     hsize_t dims[2] = {hsize_t(heaps_per_slice), 0};
     hsize_t maxdims[2] = {dims[0], H5S_UNLIMITED};
@@ -172,8 +159,7 @@ void hdf5_flags_writer::flush(flags_chunk &chunk)
         dataset.extend(new_size);
         const hsize_t offset[2] = {0, hsize_t(chunk.spectrum / spectra_per_heap)};
         const hsize_t *offset_ptr = offset;
-        dxpl.setProperty(H5D_XFER_DIRECT_CHUNK_WRITE_OFFSET_NAME, &offset_ptr);
-        dataset.write(chunk.data.get(), H5::PredType::NATIVE_UINT8, H5S_ALL, H5S_ALL, dxpl);
+        write_direct(dataset, offset, heaps_per_chunk, chunk.data.get());
     }
     chunk.spectrum = -1;
     std::memset(chunk.data.get(), data_lost, heaps_per_chunk);
@@ -238,9 +224,9 @@ H5::FileAccPropList hdf5_writer::make_fapl(bool direct)
     {
         fapl.setSec2();
     }
-    // Older versions of libhdf5 are missing the C++ version setLibverBounds
-#ifdef H5F_LIBVER_18
-    const auto version = H5F_LIBVER_18;
+    // Older versions of libhdf5 are missing the C++ version of setLibverBounds
+#ifdef H5F_LIBVER_110
+    const auto version = H5F_LIBVER_110;
 #else
     const auto version = H5F_LIBVER_LATEST;
 #endif

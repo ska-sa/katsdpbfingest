@@ -11,7 +11,6 @@ private:
     const int channels;
     const int spectra_per_heap;
     H5::DataSet dataset;
-    H5::DSetMemXferPropList dxpl;
 
 public:
     hdf5_bf_raw_writer(H5::Group &parent, int channels,
@@ -26,7 +25,6 @@ class hdf5_timestamps_writer
 private:
     static constexpr hsize_t chunk = 1048576;
     H5::DataSet dataset;
-    H5::DSetMemXferPropList dxpl;
     std::unique_ptr<std::uint64_t[], free_delete<std::uint64_t>> buffer;
     hsize_t n_buffer = 0;
     hsize_t n_written = 0;
@@ -66,7 +64,6 @@ private:
     std::size_t slices_per_chunk;
     hsize_t n_slices = 0;    ///< Total slices seen (including skipped ones)
     H5::DataSet dataset;
-    H5::DSetMemXferPropList dxpl;
 
     static std::size_t compute_chunk_size(int heaps_per_slice);
     void flush(flags_chunk &chunk);

@@ -74,7 +74,7 @@ extensions = [
         extra_compile_args=['-std=c++14', '-g0', '-O3', '-fvisibility=hidden'],
         library_dirs=hdf5['library_dirs'],
         # libgcc needs to be explicitly linked for multi-function versioning
-        libraries=['boost_system', 'hdf5_cpp', 'gcc'] + hdf5['libraries']
+        libraries=['boost_system', 'hdf5_cpp', 'hdf5_hl', 'gcc'] + hdf5['libraries']
     )
 ]
 
