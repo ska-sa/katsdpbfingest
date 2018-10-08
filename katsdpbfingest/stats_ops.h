@@ -10,7 +10,7 @@
 #ifdef TARGET
 [[gnu::target(TARGET)]]
 #endif
-// N is the number of samples values
+// N is the number of sample values
 uint32_t power_sum(int N, const int8_t *data)
 {
     uint32_t accum = 0;
