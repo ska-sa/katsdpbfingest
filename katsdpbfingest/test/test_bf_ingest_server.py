@@ -263,36 +263,44 @@ class TestCaptureServer(object):
         spectra_per_stats = self.heaps_per_stats * self.spectra_per_heap
         for heap in heaps[1:-1]:
             updated = ig.update(heap)
-            value = updated['sd_data'].value
-            flags = updated['sd_flags'].value
-            timestamp = updated['sd_timestamp'].value
+            rx_power = updated['sd_data'].value
+            rx_saturated = updated['sd_saturated'].value
+            rx_flags = updated['sd_flags'].value
+            rx_timestamp = updated['sd_timestamp'].value
 
             # Check types and shapes
-            assert_equal((len(self.args.channels), 1, 2), value.shape)
-            assert_equal(np.float32, value.dtype)
-            assert_equal((len(self.args.channels), 1), flags.shape)
-            assert_equal(np.uint8, flags.dtype)
+            assert_equal((len(self.args.channels), 1, 2), rx_power.shape)
+            assert_equal(np.float32, rx_power.dtype)
+            assert_equal((len(self.args.channels),), rx_saturated.shape)
+            assert_equal(np.float32, rx_saturated.dtype)
+            assert_equal((len(self.args.channels), 1), rx_flags.shape)
+            assert_equal(np.uint8, rx_flags.dtype)
 
             # Check calculations
-            expected_ts_unix = (spectrum + 0.5 * spectra_per_stats) * self.ticks_between_spectra \
+            ts_unix = (spectrum + 0.5 * spectra_per_stats) * self.ticks_between_spectra \
                 / self.adc_sample_rate + 111111111.0
-            np.testing.assert_allclose(expected_ts_unix * 100.0, timestamp)
+            np.testing.assert_allclose(ts_unix * 100.0, rx_timestamp)
 
             index = np.s_[:, spectrum : spectrum + spectra_per_stats]
             frame_data = expected_data[index]
             frame_weight = expected_weight[index]
             weight_sum = np.sum(frame_weight, axis=1)
             power = np.sum(frame_data.astype(np.float64)**2, axis=2)    # Sum real+imag
+            saturated = (frame_data == -128) | (frame_data == 127)
+            saturated = np.logical_or.reduce(saturated, axis=2)         # Combine real+imag
+            saturated = saturated.astype(np.float64)
             # Average over time. Can't use np.average because it complains if
             # weights sum to zero instead of giving a NaN.
             with np.errstate(divide='ignore', invalid='ignore'):
                 power = np.sum(power * frame_weight, axis=1) / weight_sum
+                saturated = np.sum(saturated * frame_weight, axis=1) / weight_sum
             power = np.where(weight_sum, power, 0)
-            np.testing.assert_allclose(power, value[:, 0, 0])
-            # Should be real only
-            np.testing.assert_equal(0, value[..., 1])
-            expected_flags = np.where(weight_sum, 0, DATA_LOST)
-            np.testing.assert_equal(expected_flags, flags[:, 0])
+            saturated = np.where(weight_sum, saturated, 0)
+            np.testing.assert_allclose(power, rx_power[:, 0, 0])
+            np.testing.assert_equal(0, rx_power[..., 1])  # Should be real only
+            np.testing.assert_allclose(saturated, rx_saturated)
+            flags = np.where(weight_sum, 0, DATA_LOST)
+            np.testing.assert_equal(flags, rx_flags[:, 0])
 
             spectrum += spectra_per_stats
 

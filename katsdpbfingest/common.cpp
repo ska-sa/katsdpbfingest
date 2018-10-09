@@ -73,6 +73,8 @@ const session_config &session_config::validate() const
         throw std::invalid_argument("channels_per_heap <= 0");
     if (spectra_per_heap <= 0)
         throw std::invalid_argument("spectra_per_heap <= 0");
+    if (spectra_per_heap > 32768)
+        throw std::invalid_argument("spectra_per_heap > 32768");
     if (ticks_between_spectra <= 0)
         throw std::invalid_argument("ticks_between_spectra <= 0");
     if (sync_time <= 0)
