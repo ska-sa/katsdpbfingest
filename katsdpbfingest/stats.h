@@ -35,11 +35,12 @@ private:
     struct transmit_data : public boost::noncopyable
     {
         spead2::send::heap heap;
-        /** Ratio power_spectrum / weight. The
-         * imaginary part is all zeros.
+        /**
+         * Packed per-channel data. The first half contains the power
+         * spectrum, while the second half contains the fraction of samples
+         * that are saturated. In both cases the imaginary part is all zeroes.
          */
-        std::vector<std::complex<float>> power_spectrum;
-        std::vector<float> saturated;     ///< Fraction of data saturated
+        std::vector<std::complex<float>> data;
         std::vector<std::uint8_t> flags;  ///< just data_lost if all samples lost
         std::uint64_t timestamp;  ///< centre, in centiseconds since Unix epoch
 
