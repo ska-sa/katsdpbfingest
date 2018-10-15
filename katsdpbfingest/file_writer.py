@@ -3,15 +3,20 @@ Writes metadata to an HDF5 file.
 """
 
 import logging
+from typing import Any
+
 import h5py
 import numpy as np
+import katsdptelstate
+
+from .telescope_model import TelescopeModelData
 
 
 logger = logging.getLogger(__name__)
 _TSTATE_DATASET = '/TelescopeState'
 
 
-def _array_encode(value):
+def _array_encode(value: Any) -> Any:
     """Convert array of Unicode values to UTF-8 encoding for storage in HDF5"""
     if isinstance(value, bytes) or isinstance(value, str):
         # h5py has special handling for these: see h5py._hl.base.guess_dtype.
@@ -23,7 +28,9 @@ def _array_encode(value):
         return value
 
 
-def set_telescope_model(h5_file, model_data, base_path="/TelescopeModel"):
+def set_telescope_model(h5_file: h5py.File,
+                        model_data: TelescopeModelData,
+                        base_path: str = "/TelescopeModel") -> None:
     """Sets the tree of telescope model data on an HDF5 file."""
     for component in model_data.components.values():
         comp_base = "{0}/{1}/".format(base_path, component.name)
@@ -62,7 +69,10 @@ def set_telescope_model(h5_file, model_data, base_path="/TelescopeModel"):
                                sensor.name, exc_info=True)
 
 
-def set_telescope_state(h5_file, tstate, base_path=_TSTATE_DATASET, start_timestamp=0):
+def set_telescope_state(h5_file: h5py.File,
+                        tstate: katsdptelstate.TelescopeState,
+                        base_path: str = _TSTATE_DATASET,
+                        start_timestamp: float = 0.0) -> None:
     """Write raw pickled telescope state to an HDF5 file."""
     tstate_group = h5_file.create_group(base_path)
     # include the subarray product id for use by the crawler to identify which

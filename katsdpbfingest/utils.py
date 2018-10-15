@@ -1,12 +1,16 @@
 """Miscellaneous ingest utilities"""
 
 import logging
+from typing import Iterator, Tuple
+
+import katsdptelstate
 
 
 _logger = logging.getLogger(__name__)
 
 
-def cbf_telstate_view(telstate, stream_name):
+def cbf_telstate_view(telstate: katsdptelstate.TelescopeState,
+                      stream_name: str) -> katsdptelstate.TelescopeState:
     """Create a telstate view that allows querying properties from a stream.
     It supports only baseline-correlation-products and
     tied-array-channelised-voltage streams. Properties that don't exist on the
@@ -15,7 +19,7 @@ def cbf_telstate_view(telstate, stream_name):
 
     Returns
     -------
-    view : :class:`katsdptelstate.TelescopeState`
+    view
         Telstate view that allows stream properties to be searched
     """
     prefixes = []
@@ -32,7 +36,7 @@ def cbf_telstate_view(telstate, stream_name):
     return telstate.__class__(prefixes=prefixes, base=telstate)
 
 
-class Range(object):
+class Range:
     """Representation of a range of values, as specified by a first and a
     past-the-end value. This can be seen as an extended form of `xrange` or
     `slice` (although without support for a non-unit step), where it is easy to
@@ -41,14 +45,14 @@ class Range(object):
     Ranges can be empty, in which case they still have a `start` and `stop`
     value that are equal, but the value itself is irrelevant.
     """
-    def __init__(self, start, stop):
+    def __init__(self, start: int, stop: int) -> None:
         if start > stop:
             raise ValueError('start must be <= stop')
         self.start = start
         self.stop = stop
 
     @classmethod
-    def parse(cls, value):
+    def parse(cls, value: str) -> 'Range':
         """Convert a string of the form 'A:B' to a :class:`~katsdpingest.utils.Range`,
         where A and B are integers.
 
@@ -60,46 +64,49 @@ class Range(object):
         else:
             return Range(int(fields[0]), int(fields[1]))
 
-    def __str__(self):
+    def __str__(self) -> str:
         return '{}:{}'.format(self.start, self.stop)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return 'Range({}, {})'.format(self.start, self.stop)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.stop - self.start
 
-    def __contains__(self, value):
+    def __contains__(self, value: int) -> bool:
         return self.start <= value < self.stop
 
     def __eq__(self, other):
         if not isinstance(other, Range):
-            return False
+            return NotImplemented
         if not self:
             return not other
         else:
             return self.start == other.start and self.stop == other.stop
 
     def __ne__(self, other):
-        return not (self == other)
+        if not isinstance(other, Range):
+            return NotImplemented
+        else:
+            return not (self == other)
 
     # Can't prevent object from being mutated, but __eq__ is defined, so not
     # suitable for hashing.
-    __hash__ = None
+    __hash__ = None        # type: ignore  # workaround for python/mypy#4266
 
-    def issubset(self, other):
+    def issubset(self, other: 'Range') -> bool:
         return self.start == self.stop or (other.start <= self.start and self.stop <= other.stop)
 
-    def issuperset(self, other):
+    def issuperset(self, other: 'Range') -> bool:
         return other.issubset(self)
 
-    def isaligned(self, alignment):
+    def isaligned(self, alignment: int) -> bool:
         """Whether the start and end of this interval are aligned to multiples
         of `alignment`.
         """
         return not self or (self.start % alignment == 0 and self.stop % alignment == 0)
 
-    def alignto(self, alignment):
+    def alignto(self, alignment: int) -> 'Range':
         """Return the smallest range containing self for which
         ``r.isaligned()`` is true.
         """
@@ -109,7 +116,7 @@ class Range(object):
             return Range(self.start // alignment * alignment,
                          (self.stop + alignment - 1) // alignment * alignment)
 
-    def intersection(self, other):
+    def intersection(self, other: 'Range') -> 'Range':
         start = max(self.start, other.start)
         stop = min(self.stop, other.stop)
         if start > stop:
@@ -117,7 +124,7 @@ class Range(object):
         else:
             return Range(start, stop)
 
-    def union(self, other):
+    def union(self, other: 'Range') -> 'Range':
         """Return the smallest range containing both ranges."""
         if not self:
             return other
@@ -125,10 +132,10 @@ class Range(object):
             return self
         return Range(min(self.start, other.start), max(self.stop, other.stop))
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         return iter(range(self.start, self.stop))
 
-    def relative_to(self, other):
+    def relative_to(self, other: 'Range') -> 'Range':
         """Return a new range that represents `self` as a range relative to
         `other` (i.e. where the start element of `other` is numbered 0). If
         `self` is an empty range, an undefined empty range is returned.
@@ -142,15 +149,15 @@ class Range(object):
             raise ValueError('self is not a subset of other')
         return Range(self.start - other.start, self.stop - other.start)
 
-    def asslice(self):
+    def asslice(self) -> slice:
         """Return a slice object representing the same range"""
         return slice(self.start, self.stop)
 
-    def astuple(self):
+    def astuple(self) -> Tuple[int, int]:
         """Return a tuple containing the start and end values"""
         return (self.start, self.stop)
 
-    def split(self, chunks, chunk_id):
+    def split(self, chunks: int, chunk_id: int) -> 'Range':
         """Return the `chunk_id`-th of `chunks` equally-sized pieces.
 
         Raises

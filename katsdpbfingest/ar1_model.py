@@ -5,6 +5,8 @@ components. CBF and other devices still static whilst we develop
 kattelmod
 """
 
+from typing import List
+
 from .telescope_model import TelescopeComponent, TelescopeModel
 
 
@@ -12,7 +14,7 @@ from .telescope_model import TelescopeComponent, TelescopeModel
 
 class AntennaPositioner(TelescopeComponent):
     def __init__(self, *args, **kwargs):
-        super(AntennaPositioner, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.add_sensors(
             ['activity', 'target',
              'pos_request_scan_azim', 'pos_request_scan_elev',
@@ -23,14 +25,14 @@ class AntennaPositioner(TelescopeComponent):
 
 class CorrelatorBeamformer(TelescopeComponent):
     def __init__(self, *args, **kwargs):
-        super(CorrelatorBeamformer, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.add_sensors(['target'], True)
         self.add_sensors(['auto_delay_enabled'], False)
 
 
 class Enviro(TelescopeComponent):
     def __init__(self, *args, **kwargs):
-        super(Enviro, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.add_sensors(
             ['air_pressure', 'air_relative_humidity', 'air_temperature',
              'mean_wind_speed', 'wind_direction'])
@@ -38,13 +40,13 @@ class Enviro(TelescopeComponent):
 
 class Observation(TelescopeComponent):
     def __init__(self, *args, **kwargs):
-        super(Observation, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.add_sensors(['label'], True)
         self.add_sensors(['script_log'], False)
 
 
-def create_model(antenna_mask=[]):
-    components = []
+def create_model(antenna_mask: List[str] = []):
+    components = []      # type: List[TelescopeComponent]
     for ant_name in antenna_mask:
         components.append(AntennaPositioner(name=ant_name))
     cbf = CorrelatorBeamformer(name='cbf')

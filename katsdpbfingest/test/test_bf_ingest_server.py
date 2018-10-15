@@ -29,8 +29,8 @@ from ..utils import Range
 DATA_LOST = 1 << 3
 
 
-class TestSession(object):
-    def setup(self):
+class TestSession:
+    def setup(self) -> None:
         # To avoid collisions when running tests in parallel on a single host,
         # create a socket for the duration of the test and use its port as the
         # port for the test. Sockets in the same network namespace should have
@@ -40,11 +40,11 @@ class TestSession(object):
         self.port = self._sock.getsockname()[1]
         self.tmpdir = tempfile.mkdtemp()
 
-    def teardown(self):
+    def teardown(self) -> None:
         shutil.rmtree(self.tmpdir)
         self._sock.close()
 
-    def test_no_stop(self):
+    def test_no_stop(self) -> None:
         """Deleting a session without stopping it must tidy up"""
         config = _bf_ingest.SessionConfig(os.path.join(self.tmpdir, 'test_no_stop.h5'))
         config.add_endpoint('239.1.2.3', self.port)
@@ -60,7 +60,7 @@ class TestSession(object):
 
 
 class TestCaptureServer(asynctest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmpdir)
         # To avoid collisions when running tests in parallel on a single host,
@@ -113,7 +113,7 @@ class TestCaptureServer(asynctest.TestCase):
             stats_interface='lo')
         self.loop = asyncio.get_event_loop()
 
-    async def test_manual_stop_no_data(self):
+    async def test_manual_stop_no_data(self) -> None:
         """Manual stop before any data is received"""
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
         assert_false(server.capturing)
@@ -123,7 +123,7 @@ class TestCaptureServer(asynctest.TestCase):
         await server.stop_capture()
         assert_false(server.capturing)
 
-    async def _test_stream(self, end, write):
+    async def _test_stream(self, end: bool, write: bool) -> None:
         n_heaps = 25              # number of heaps in time
         n_spectra = self.spectra_per_heap * n_heaps
         # Pick some heaps to drop, including an entire slice and
@@ -294,14 +294,14 @@ class TestCaptureServer(asynctest.TestCase):
 
             spectrum += spectra_per_stats
 
-    async def test_stream_end(self):
+    async def test_stream_end(self) -> None:
         """Stream ends with an end-of-stream"""
         await self._test_stream(True, True)
 
-    async def test_stream_no_end(self):
+    async def test_stream_no_end(self) -> None:
         """Stream ends with a stop request"""
         await self._test_stream(False, True)
 
-    async def test_stream_no_write(self):
+    async def test_stream_no_write(self) -> None:
         """Stream with only statistics, no output file"""
         await self._test_stream(True, False)

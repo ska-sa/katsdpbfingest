@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from setuptools import setup, find_packages, Extension
-from distutils.command.build_ext import build_ext
+from distutils.command.build_ext import build_ext     # type: ignore  # typeshed doesn't capture it
 import glob
 import importlib
 import subprocess
@@ -16,7 +16,7 @@ except ImportError:
 tests_require = ['nose', 'spead2', 'asynctest']
 
 
-class get_include(object):
+class get_include:
     """Helper class to defer importing a module until build time for fetching
     the include directory.
     """

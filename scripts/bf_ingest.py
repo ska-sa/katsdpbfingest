@@ -15,7 +15,7 @@ from katsdpbfingest.bf_ingest_server import KatcpCaptureServer
 from katsdpbfingest.utils import Range
 
 
-def on_shutdown(server):
+def on_shutdown(server: KatcpCaptureServer) -> None:
     logging.info('Shutting down')
     loop = asyncio.get_event_loop()
     loop.remove_signal_handler(signal.SIGINT)
@@ -23,7 +23,7 @@ def on_shutdown(server):
     server.halt()
 
 
-async def main():
+async def main() -> None:
     katsdpservices.setup_logging()
     katsdpservices.setup_restart()
     parser = katsdpservices.ArgumentParser(
