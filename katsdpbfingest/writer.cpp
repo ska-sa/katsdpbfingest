@@ -158,7 +158,6 @@ void hdf5_flags_writer::flush(flags_chunk &chunk)
         hsize_t new_size[2] = {hsize_t(heaps_per_slice), n_slices};
         dataset.extend(new_size);
         const hsize_t offset[2] = {0, hsize_t(chunk.spectrum / spectra_per_heap)};
-        const hsize_t *offset_ptr = offset;
         write_direct(dataset, offset, heaps_per_chunk, chunk.data.get());
     }
     chunk.spectrum = -1;

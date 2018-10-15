@@ -28,7 +28,7 @@ USER kat
 # Install dependencies. We need to set library-dirs so that the new libhdf5
 # will be found. We must avoid using the h5py wheel, because it will contain
 # its own hdf5 libraries while we want to link to the system ones.
-ENV PATH="$PATH_PYTHON2" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON2"
+ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
 WORKDIR /tmp/install
 RUN /bin/echo -e '[build_ext]\nlibrary-dirs=/usr/local/lib' > setup.cfg
@@ -53,7 +53,7 @@ RUN ldconfig
 USER kat
 
 COPY --from=build --chown=kat:kat /home/kat/ve /home/kat/ve
-ENV PATH="$PATH_PYTHON2" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON2"
+ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 EXPOSE 2050
 EXPOSE 7148/udp

@@ -13,7 +13,7 @@ _TSTATE_DATASET = '/TelescopeState'
 
 def _array_encode(value):
     """Convert array of Unicode values to UTF-8 encoding for storage in HDF5"""
-    if isinstance(value, bytes) or isinstance(value, unicode):
+    if isinstance(value, bytes) or isinstance(value, str):
         # h5py has special handling for these: see h5py._hl.base.guess_dtype.
         return value
     value = np.asarray(value)

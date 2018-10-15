@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from setuptools import setup, find_packages, Extension
 from distutils.command.build_ext import build_ext
 import glob
@@ -13,7 +13,7 @@ except ImportError:
     hdf5 = collections.defaultdict(list)
 
 
-tests_require = ['nose', 'spead2']
+tests_require = ['nose', 'spead2', 'asynctest']
 
 
 class get_include(object):
@@ -71,7 +71,7 @@ extensions = [
         language='c++',
         include_dirs=['spead2/include', 'spead2/3rdparty/pybind11/include'] + hdf5['include_dirs'],
         define_macros=hdf5['define_macros'],
-        extra_compile_args=['-std=c++14', '-g0', '-O3', '-fvisibility=hidden'],
+        extra_compile_args=['-std=c++14', '-g0', '-O3', '-fvisibility=hidden'],  # DEBUG
         library_dirs=hdf5['library_dirs'],
         # libgcc needs to be explicitly linked for multi-function versioning
         libraries=['boost_system', 'hdf5_cpp', 'hdf5_hl', 'gcc'] + hdf5['libraries']
@@ -91,14 +91,11 @@ setup(
     setup_requires=['katversion', 'pkgconfig'],
     install_requires=[
         'h5py',
-        'futures',
         'numpy',
-        'katcp',
+        'aiokatcp',
         'katsdpservices',
         'katsdptelstate',
-        'spead2',
-        'tornado<5',
-        'trollius'
+        'spead2'
     ],
     extras_require={
         'test': tests_require

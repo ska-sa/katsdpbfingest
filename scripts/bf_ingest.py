@@ -1,31 +1,29 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import print_function, division, absolute_import
 import signal
-import trollius
-from tornado.platform.asyncio import AsyncIOMainLoop, to_asyncio_future
+import asyncio
 import logging
-from trollius import From
 import argparse
 import os
 import sys
+
 import katsdptelstate.endpoint
 import spead2
 import katsdpservices
+
 from katsdpbfingest.bf_ingest_server import KatcpCaptureServer
 from katsdpbfingest.utils import Range
 
 
-@trollius.coroutine
 def on_shutdown(server):
     logging.info('Shutting down')
-    trollius.get_event_loop().remove_signal_handler(signal.SIGINT)
-    trollius.get_event_loop().remove_signal_handler(signal.SIGTERM)
-    yield From(to_asyncio_future(server.stop()))
-    trollius.get_event_loop().stop()
+    loop = asyncio.get_event_loop()
+    loop.remove_signal_handler(signal.SIGINT)
+    loop.remove_signal_handler(signal.SIGTERM)
+    server.halt()
 
 
-def main():
+async def main():
     katsdpservices.setup_logging()
     katsdpservices.setup_restart()
     parser = katsdpservices.ArgumentParser(
@@ -84,18 +82,16 @@ def main():
     if args.file_base is not None and not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)
         sys.exit(1)
-    ioloop = AsyncIOMainLoop()
-    ioloop.install()
-    server = KatcpCaptureServer(args, trollius.get_event_loop())
-    server.set_concurrency_options(thread_safe=False, handler_thread=False)
-    server.set_ioloop(ioloop)
-    trollius.get_event_loop().add_signal_handler(
-        signal.SIGINT, lambda: trollius.async(on_shutdown(server)))
-    trollius.get_event_loop().add_signal_handler(
-        signal.SIGTERM, lambda: trollius.async(on_shutdown(server)))
-    ioloop.add_callback(server.start)
-    trollius.get_event_loop().run_forever()
+
+    loop = asyncio.get_event_loop()
+    server = KatcpCaptureServer(args, loop)
+    loop.add_signal_handler(signal.SIGINT, lambda: on_shutdown(server))
+    loop.add_signal_handler(signal.SIGTERM, lambda: on_shutdown(server))
+    await server.start()
+    await server.join()
 
 
 if __name__ == '__main__':
-    main()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    loop.close()

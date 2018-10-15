@@ -131,9 +131,11 @@ static void add_vector(spead2::send::heap &heap, spead2::s_item_pointer_t id,
                        std::vector<T> &data)
 {
     add_descriptor(heap, id, name, description, shape, dtype);
+#ifndef NDEBUG
     std::size_t expected_size = std::accumulate(shape.begin(), shape.end(), std::size_t(1),
                                                 std::multiplies<>());
     assert(expected_size == data.size());
+#endif
     heap.add_item(id, data.data(), data.size() * sizeof(T), false);
 }
 

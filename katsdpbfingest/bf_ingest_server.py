@@ -1,25 +1,19 @@
-from __future__ import print_function, division, absolute_import
 import time
 import os
 import os.path
 import logging
 import socket
 import contextlib
-
+import asyncio
 import concurrent.futures
 
 import h5py
 import numpy as np
 
-import trollius
-from trollius import From, Return
-import tornado
-
-import katcp
-from katcp.kattypes import request, return_reply, Str
+import aiokatcp
+from aiokatcp import FailReply
 
 import katsdpservices
-import katsdpservices.asyncio
 
 from ._bf_ingest import Session, SessionConfig
 from . import utils, telescope_model, ar1_model, file_writer
@@ -125,7 +119,7 @@ class _CaptureSession(object):
         Telescope state (optional)
     stream_name : str
         Name of the beamformer stream being captured
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         IO Loop for the coroutine
 
     Attributes
@@ -134,11 +128,11 @@ class _CaptureSession(object):
         Filename of the HDF5 file written
     _telstate : :class:`katsdptelstate.TelescopeState`
         Telescope state interface, if any
-    _loop : :class:`trollius.BaseEventLoop`
+    _loop : :class:`asyncio.AbstractEventLoop`
         Event loop passed to the constructor
     _session : :class:`katsdpbfingest._bf_ingest.Session`
         C++-driven capture session
-    _run_future : :class:`trollius.Task`
+    _run_future : :class:`asyncio.Task`
         Task for the coroutine that waits for the C++ code and finalises
     """
     def __init__(self, config, telstate, stream_name, loop):
@@ -149,7 +143,7 @@ class _CaptureSession(object):
         self.stream_name = stream_name
         self._config = config
         self._session = Session(config)
-        self._run_future = trollius.async(self._run(), loop=self._loop)
+        self._run_future = loop.create_task(self._run())
 
     def _write_metadata(self):
         telstate = self._telstate
@@ -175,27 +169,28 @@ class _CaptureSession(object):
                 data_group.attrs['stream_name'] = self.stream_name
                 data_group.attrs['channel_offset'] = self._config.channel_offset
 
-    @trollius.coroutine
-    def _run(self):
-        pool = concurrent.futures.ThreadPoolExecutor(1)
-        try:
-            yield From(self._loop.run_in_executor(pool, self._session.join))
-            if self._session.n_heaps > 0 and self.filename is not None:
-                # Write the metadata to file
-                self._write_metadata()
-            _logger.info('Capture complete, %d heaps, of which %d dropped',
-                         self._session.n_total_heaps,
-                         self._session.n_total_heaps - self._session.n_heaps)
-        except Exception:
-            _logger.error("Capture threw exception", exc_info=True)
+    async def _run(self):
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            try:
+                # Just passing self._session.join causes an exception in Python
+                # 3.5 because iscoroutinefunction doesn't work on functions
+                # defined by extensions. Hence the lambda.
+                await self._loop.run_in_executor(pool, lambda: self._session.join())
+                if self._session.n_heaps > 0 and self.filename is not None:
+                    # Write the metadata to file
+                    self._write_metadata()
+                _logger.info('Capture complete, %d heaps, of which %d dropped',
+                             self._session.n_total_heaps,
+                             self._session.n_total_heaps - self._session.n_heaps)
+            except Exception:
+                _logger.error("Capture threw exception", exc_info=True)
 
-    @trollius.coroutine
-    def stop(self):
+    async def stop(self):
         """Shut down the stream and wait for the session to end. This
         is a coroutine.
         """
         self._session.stop_stream()
-        yield From(self._run_future)
+        await self._run_future
 
 
 class CaptureServer(object):
@@ -220,7 +215,7 @@ class CaptureServer(object):
         - stats_int_time
         - stats_interface
 
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         IO Loop for running coroutines
 
     Attributes
@@ -231,7 +226,7 @@ class CaptureServer(object):
         :class:`stop_capture`, even if the stream has terminated.
     _args : :class:`argparse.Namespace`
         Command-line arguments passed to constructor
-    _loop : :class:`trollius.BaseEventLoop`
+    _loop : :class:`asyncio.AbstractEventLoop`
         IO Loop passed to constructor
     _capture : :class:`_CaptureSession`
         Current capture session, or ``None`` if not capturing
@@ -248,8 +243,7 @@ class CaptureServer(object):
     def capturing(self):
         return self._capture is not None
 
-    @trollius.coroutine
-    def start_capture(self, capture_block_id):
+    async def start_capture(self, capture_block_id):
         """Start capture, if not already in progress.
 
         This is a co-routine.
@@ -262,21 +256,20 @@ class CaptureServer(object):
                 self._config.filename = None
             self._capture = _CaptureSession(
                 self._config, self._args.telstate, self._args.stream_name, self._loop)
-        raise Return(self._capture.filename)
+        return self._capture.filename
 
-    @trollius.coroutine
-    def stop_capture(self):
+    async def stop_capture(self):
         """Stop capture, if currently running. This is a co-routine."""
         if self._capture is not None:
             capture = self._capture
-            yield From(capture.stop())
+            await capture.stop()
             # Protect against a concurrent stop and start changing to a new
             # capture.
             if self._capture is capture:
                 self._capture = None
 
 
-class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
+class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
     """katcp device server for beamformer capture.
 
     Parameters
@@ -289,63 +282,39 @@ class KatcpCaptureServer(CaptureServer, katcp.DeviceServer):
           Hostname to bind to ('' for none)
         port
           Port number to bind to
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.AbstractEventLoop`
         IO Loop for running coroutines
     """
 
-    VERSION_INFO = ('bf-ingest', 1, 0)
-    BUILD_INFO = ('katsdpbfingest',) + tuple(katsdpbfingest.__version__.split('.', 1)) + ('',)
+    VERSION = 'bf-ingest-1.0'
+    BUILD_STATE = 'katsdpbfingest-' + katsdpbfingest.__version__
 
     def __init__(self, args, loop):
         CaptureServer.__init__(self, args, loop)
-        katcp.DeviceServer.__init__(self, args.host, args.port)
+        aiokatcp.DeviceServer.__init__(self, args.host, args.port, loop=loop)
 
-    def setup_sensors(self):
-        pass
-
-    @tornado.gen.coroutine
-    def _start_capture(self, capture_block_id):
-        """Tornado variant of :meth:`start_capture`"""
-        start_future = trollius.async(self.start_capture(capture_block_id), loop=self._loop)
-        yield katsdpservices.asyncio.to_tornado_future(start_future)
-
-    @request(Str())
-    @return_reply()
-    @tornado.gen.coroutine
-    def request_capture_init(self, sock, capture_block_id):
+    async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Start capture to file."""
         if self.capturing:
-            raise tornado.gen.Return(('fail', 'already capturing'))
+            raise FailReply('already capturing')
         if self._args.file_base is not None:
             stat = os.statvfs(self._args.file_base)
             if stat.f_bavail / stat.f_blocks < 0.05:
-                raise tornado.gen.Return(('fail', 'less than 5% disk space free on {}'.format(
-                    os.path.abspath(self._args.file_base))))
-        yield self._start_capture(capture_block_id)
-        raise tornado.gen.Return(('ok',))
+                raise FailReply('less than 5% disk space free on {}'.format(
+                    os.path.abspath(self._args.file_base)))
+        await self.start_capture(capture_block_id)
 
-    @tornado.gen.coroutine
-    def _stop_capture(self):
-        """Tornado variant of :meth:`stop_capture`"""
-        stop_future = trollius.async(self.stop_capture(), loop=self._loop)
-        yield katsdpservices.asyncio.to_tornado_future(stop_future)
-
-    @request()
-    @return_reply()
-    @tornado.gen.coroutine
-    def request_capture_done(self, sock):
+    async def request_capture_done(self, ctx) -> None:
         """Stop a capture that is in progress."""
         if not self.capturing:
-            raise tornado.gen.Return(('fail', 'not capturing'))
-        yield self._stop_capture()
-        raise tornado.gen.Return(('ok',))
+            raise FailReply('not capturing')
+        await self.stop_capture()
 
-    @tornado.gen.coroutine
-    def stop(self):
-        yield self._stop_capture()
-        yield katcp.DeviceServer.stop(self)
+    async def stop(self, cancel: bool = True) -> None:
+        await self.stop_capture()
+        await aiokatcp.DeviceServer.stop(self, cancel)
 
-    stop.__doc__ = katcp.DeviceServer.stop.__doc__
+    stop.__doc__ = aiokatcp.DeviceServer.stop.__doc__
 
 
 __all__ = ['CaptureServer', 'KatcpCaptureServer']

@@ -1,23 +1,17 @@
-backports-abc             # via tornado
-certifi                   # via tornado
+aiokatcp
+async-timeout             # via aiokatcp
+decorator                 # via aiokatcp
 fakeredis                 # via katsdptelstate
-future                    # via katcp
-futures
 h5py
 ipaddress                 # via katsdptelstate
-katcp
 katversion
 hiredis                   # via katsdptelstate
 netifaces                 # via katsdptelstate
 numpy
 pkgconfig==1.2.2
-ply                       # via katcp
 pygelf                    # via katsdpservices
 redis                     # via katsdptelstate
-singledispatch            # via tornado
-six                       # via h5py, singledispatch, spead2, trollius
+six                       # via h5py, spead2
 spead2
-tornado
-trollius
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate

@@ -126,7 +126,7 @@ class Range(object):
         return Range(min(self.start, other.start), max(self.stop, other.stop))
 
     def __iter__(self):
-        return iter(xrange(self.start, self.stop))
+        return iter(range(self.start, self.stop))
 
     def relative_to(self, other):
         """Return a new range that represents `self` as a range relative to

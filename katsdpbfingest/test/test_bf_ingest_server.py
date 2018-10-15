@@ -1,6 +1,5 @@
 """Tests for the bf_ingest_server module"""
 
-from __future__ import print_function, division, absolute_import
 import argparse
 import tempfile
 import shutil
@@ -8,17 +7,16 @@ import os.path
 import time
 import contextlib
 import socket
+import asyncio
 
 import h5py
 import numpy as np
-
-import trollius
-from trollius import From
 
 import spead2
 import spead2.recv
 import spead2.send
 
+import asynctest
 from nose.tools import assert_equal, assert_true, assert_false, assert_is_none
 
 import katsdptelstate
@@ -61,14 +59,16 @@ class TestSession(object):
         _bf_ingest.Session(config)
 
 
-class TestCaptureServer(object):
-    def setup(self):
+class TestCaptureServer(asynctest.TestCase):
+    def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir)
         # To avoid collisions when running tests in parallel on a single host,
         # create a socket for the duration of the test and use its port as the
         # port for the test. Sockets in the same network namespace should have
         # unique ports.
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(self._sock.close)
         self._sock.bind(('127.0.0.1', 0))
         self.port = self._sock.getsockname()[1]
         self.n_channels = 1024
@@ -111,29 +111,19 @@ class TestCaptureServer(object):
                             self.ticks_between_spectra * self.spectra_per_heap /
                             self.adc_sample_rate),
             stats_interface='lo')
-        self.loop = trollius.get_event_loop()
+        self.loop = asyncio.get_event_loop()
 
-    def teardown(self):
-        shutil.rmtree(self.tmpdir)
-        self._sock.close()
-        self.args.telstate.clear()
-
-    @trollius.coroutine
-    def _test_manual_stop_no_data(self):
+    async def test_manual_stop_no_data(self):
+        """Manual stop before any data is received"""
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
         assert_false(server.capturing)
-        yield From(server.start_capture('1122334455'))
+        await server.start_capture('1122334455')
         assert_true(server.capturing)
-        yield From(trollius.sleep(0.01, loop=self.loop))
-        yield From(server.stop_capture())
+        await asyncio.sleep(0.01, loop=self.loop)
+        await server.stop_capture()
         assert_false(server.capturing)
 
-    def test_manual_stop_no_data(self):
-        """Manual stop before any data is received"""
-        trollius.get_event_loop().run_until_complete(self._test_manual_stop_no_data())
-
-    @trollius.coroutine
-    def _test_stream(self, end, write):
+    async def _test_stream(self, end, write):
         n_heaps = 25              # number of heaps in time
         n_spectra = self.spectra_per_heap * n_heaps
         # Pick some heaps to drop, including an entire slice and
@@ -147,7 +137,7 @@ class TestCaptureServer(object):
             self.args.file_base = None
 
         # Start a receiver to get the signal display stream.
-        # It need a deep queue because we don't service it while it is
+        # It needs a deep queue because we don't service it while it is
         # running.
         rx = spead2.recv.Stream(spead2.ThreadPool(), max_heaps=2, ring_heaps=100)
         rx.stop_on_stop_item = False
@@ -156,7 +146,7 @@ class TestCaptureServer(object):
 
         # Start up the server
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
-        filename = yield From(server.start_capture('1122334455'))
+        filename = await server.start_capture('1122334455')
         time.sleep(0.1)
         # Send it a SPEAD stream
         config = spead2.send.StreamConfig(max_packet_size=4196, rate=1e9 / 8)
@@ -197,9 +187,9 @@ class TestCaptureServer(object):
         streams = []
 
         # Wait for stream to shut down on its own
-        yield From(trollius.sleep(0.1))
+        await asyncio.sleep(0.1)
         # Shut down the session
-        yield From(server.stop_capture())
+        await server.stop_capture()
 
         expected_data = np.zeros((self.n_channels, n_spectra, 2), np.int8)
         expected_weight = np.ones((self.n_channels, n_spectra), np.int8)
@@ -304,14 +294,14 @@ class TestCaptureServer(object):
 
             spectrum += spectra_per_stats
 
-    def test_stream_end(self):
+    async def test_stream_end(self):
         """Stream ends with an end-of-stream"""
-        trollius.get_event_loop().run_until_complete(self._test_stream(True, True))
+        await self._test_stream(True, True)
 
-    def test_stream_no_end(self):
+    async def test_stream_no_end(self):
         """Stream ends with a stop request"""
-        trollius.get_event_loop().run_until_complete(self._test_stream(False, True))
+        await self._test_stream(False, True)
 
-    def test_stream_no_write(self):
+    async def test_stream_no_write(self):
         """Stream with only statistics, no output file"""
-        trollius.get_event_loop().run_until_complete(self._test_stream(True, False))
+        await self._test_stream(True, False)
