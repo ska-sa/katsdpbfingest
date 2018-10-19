@@ -253,18 +253,19 @@ class TestCaptureServer(asynctest.TestCase):
         spectra_per_stats = self.heaps_per_stats * self.spectra_per_heap
         for heap in heaps[1:-1]:
             updated = ig.update(heap)
-            rx_power = updated['sd_data'].value
-            rx_saturated = updated['sd_saturated'].value
+            rx_data = updated['sd_data'].value
             rx_flags = updated['sd_flags'].value
             rx_timestamp = updated['sd_timestamp'].value
 
             # Check types and shapes
-            assert_equal((len(self.args.channels), 1, 2), rx_power.shape)
-            assert_equal(np.float32, rx_power.dtype)
-            assert_equal((len(self.args.channels),), rx_saturated.shape)
-            assert_equal(np.float32, rx_saturated.dtype)
-            assert_equal((len(self.args.channels), 1), rx_flags.shape)
+            assert_equal((len(self.args.channels), 2, 2), rx_data.shape)
+            assert_equal(np.float32, rx_data.dtype)
+            assert_equal((len(self.args.channels), 2), rx_flags.shape)
             assert_equal(np.uint8, rx_flags.dtype)
+            np.testing.assert_equal(0, rx_data[..., 1])  # Should be real only
+
+            rx_power = rx_data[:, 0, 0]
+            rx_saturated = rx_data[:, 1, 0]
 
             # Check calculations
             ts_unix = (spectrum + 0.5 * spectra_per_stats) * self.ticks_between_spectra \
@@ -286,8 +287,7 @@ class TestCaptureServer(asynctest.TestCase):
                 saturated = np.sum(saturated * frame_weight, axis=1) / weight_sum
             power = np.where(weight_sum, power, 0)
             saturated = np.where(weight_sum, saturated, 0)
-            np.testing.assert_allclose(power, rx_power[:, 0, 0])
-            np.testing.assert_equal(0, rx_power[..., 1])  # Should be real only
+            np.testing.assert_allclose(power, rx_power)
             np.testing.assert_allclose(saturated, rx_saturated)
             flags = np.where(weight_sum, 0, DATA_LOST)
             np.testing.assert_equal(flags, rx_flags[:, 0])

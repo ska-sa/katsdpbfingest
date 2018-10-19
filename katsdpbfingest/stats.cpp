@@ -43,8 +43,6 @@ static constexpr int id_sd_data_index = 0x3509;
 static constexpr int id_sd_blmx_n_chans = 0x350A;
 static constexpr int id_sd_flag_fraction = 0x350B;
 static constexpr int id_sd_timeseriesabs = 0x3510;
-// TODO: I've made this up for testing, but it's not yet registered
-static constexpr int id_sd_saturated = 0x350C;
 
 /// Make SPEAD 64-48 flavour
 static spead2::flavour make_flavour()
@@ -161,18 +159,17 @@ static void add_zeros(spead2::send::heap &heap, spead2::s_item_pointer_t id,
 
 stats_collector::transmit_data::transmit_data(const session_config &config)
     : heap(make_flavour()),
-    power_spectrum(config.channels),
-    saturated(config.channels),
-    flags(config.channels)
+    data(2 * config.channels),
+    flags(2 * config.channels)
 {
     using namespace std::literals;
 
-    add_vector(heap, id_sd_data, "sd_data", "Power spectrum",
-               {config.channels, 1, 2}, "f4", power_spectrum);
-    add_vector(heap, id_sd_saturated, "sd_saturated", "Fraction of samples that saturated",
-               {config.channels}, "f4", saturated);
+    add_vector(heap, id_sd_data, "sd_data",
+               "Power spectrum and fraction of samples that are saturated. These are encoded "
+               "as baselines with inputs m999h,m999h and m999v,m999v respectively.",
+               {config.channels, 2, 2}, "f4", data);
     add_vector(heap, id_sd_flags, "sd_flags", "8bit packed flags for each data point.",
-               {config.channels, 1}, "u1", flags);
+               {config.channels, 2}, "u1", flags);
     add_descriptor(heap, id_sd_timestamp, "sd_timestamp", "Timestamp of this sd frame in centiseconds since epoch",
                    {}, "u8");
     heap.add_item(id_sd_timestamp, &timestamp, sizeof(timestamp), true);
@@ -187,26 +184,24 @@ stats_collector::transmit_data::transmit_data(const session_config &config)
                    {}, "f8");
     add_constant(heap, id_center_freq, config.center_freq);
     add_descriptor(heap, id_bls_ordering, "bls_ordering", "Baseline output ordering.",
-                   {1, 2}, "S5");  // Must match the chosen input name
-    // TODO: use a proper name. The m999h is to fit the signal display's expectations
-    add_constant(heap, id_bls_ordering, "m999hm999h"s);
+                   {2, 2}, "S5");  // Must match the chosen input name
+    // TODO: use a proper name. The m999h/v is to fit the signal display's expectations
+    add_constant(heap, id_bls_ordering, "m999hm999hm999vm999v"s);
     add_descriptor(heap, id_sd_data_index, "sd_data_index", "Indices for transmitted sd_data.",
-                   {1}, "u4");
-    add_constant(heap, id_sd_data_index, std::uint32_t(0));
+                   {2}, "u4");
+    add_constant(heap, id_sd_data_index, std::array<std::uint32_t, 2>{{0, 1}});
 
     // TODO: fields below here are just for testing against a correlator signal
     // display server, and should mostly be removed.
     add_descriptor(heap, id_sd_blmx_n_chans, "sd_blmx_n_chans", "Dummy item", {}, "u4");
     add_constant(heap, id_sd_blmx_n_chans, std::uint32_t(config.channels));
-    add_descriptor(heap, id_sd_blmxdata, "sd_blmxdata", "Dummy item", {config.channels, 1, 2}, "f4");
-    heap.add_item(id_sd_blmxdata,
-                  power_spectrum.data(),
-                  power_spectrum.size() * sizeof(power_spectrum[0]), false);
-    add_descriptor(heap, id_sd_blmxflags, "sd_blmxflags", "Dummy item", {config.channels, 1}, "u1");
-    heap.add_item(id_sd_blmxflags, flags.data(), flags.size() * sizeof(flags[0]), false);
-    add_zeros<float>(heap, id_sd_flag_fraction, "sd_flag_fraction", {1, 8}, "f4");
-    add_zeros<float>(heap, id_sd_timeseries, "sd_timeseries", {1, 2}, "f4");
-    add_zeros<float>(heap, id_sd_timeseriesabs, "sd_timeseriesabs", {1}, "f4");
+    add_vector(heap, id_sd_blmxdata, "sd_blmxdata", "Dummy item",
+               {config.channels, 2, 2}, "f4", data);
+    add_vector(heap, id_sd_blmxflags, "sd_blmxflags", "Dummy item",
+               {config.channels, 2}, "u1", flags);
+    add_zeros<float>(heap, id_sd_flag_fraction, "sd_flag_fraction", {2, 8}, "f4");
+    add_zeros<float>(heap, id_sd_timeseries, "sd_timeseries", {2, 2}, "f4");
+    add_zeros<float>(heap, id_sd_timeseriesabs, "sd_timeseriesabs", {2}, "f4");
     add_zeros<float>(heap, id_sd_percspectrum, "sd_percspectrum", {config.channels, 40}, "f4");
     add_zeros<std::uint8_t>(heap, id_sd_percspectrumflags, "sd_percspectrumflags",
                             {config.channels, 40}, "u1");
@@ -300,14 +295,15 @@ void stats_collector::transmit()
         if (weight[i] != 0)
         {
             float w = 1.0f / weight[i];
-            data.power_spectrum[i] = power_spectrum[i] * w;
-            data.saturated[i] = saturated[i] * w;
+            data.data[2 * i] = power_spectrum[i] * w;
+            data.data[2 * i + 1] = saturated[i] * w;
         }
         else
         {
-            data.power_spectrum[i] = 0;
-            data.saturated[i] = 0;
-            data.flags[i] = data_lost;
+            data.data[2 * i] = 0;
+            data.data[2 * i + 1] = 0;
+            data.flags[2 * i] = data_lost;
+            data.flags[2 * i + 1] = data_lost;
         }
     }
     double timestamp_unix = sync_time + (start_timestamp + 0.5 * interval) / scale_factor_timestamp;
