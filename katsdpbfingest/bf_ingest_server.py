@@ -7,24 +7,29 @@ import contextlib
 import argparse
 import asyncio
 import concurrent.futures
-from typing import Optional       # noqa: F401
+from typing import Optional, Callable       # noqa: F401
 
 import h5py
 import numpy as np
 
 import aiokatcp
-from aiokatcp import FailReply
+from aiokatcp import FailReply, Sensor
 
 import katsdpservices
 import katsdptelstate
 
-from ._bf_ingest import Session, SessionConfig
+from ._bf_ingest import Session, SessionConfig, SessionCounters
 from . import utils, telescope_model, ar1_model, file_writer
 from .utils import Range
 import katsdpbfingest
 
 
 _logger = logging.getLogger(__name__)
+
+
+def _warn_if_positive(value: float) -> aiokatcp.Sensor.Status:
+    """Status function for sensors that count problems"""
+    return Sensor.Status.WARN if value > 0 else Sensor.Status.NOMINAL
 
 
 def _config_from_telstate(telstate: katsdptelstate.TelescopeState,
@@ -124,6 +129,8 @@ class _CaptureSession:
         Telescope state (optional)
     stream_name
         Name of the beamformer stream being captured
+    update_counters
+        Called once a second with progress counters
     loop
         IO Loop for the coroutine
 
@@ -141,12 +148,14 @@ class _CaptureSession:
         Task for the coroutine that waits for the C++ code and finalises
     """
     def __init__(self, config: SessionConfig, telstate: katsdptelstate.TelescopeState,
-                 stream_name: str, loop: asyncio.AbstractEventLoop) -> None:
+                 stream_name: str, update_counters: Callable[[SessionCounters], None],
+                 loop: asyncio.AbstractEventLoop) -> None:
         self._start_time = time.time()
         self._loop = loop
         self._telstate = telstate
         self.filename = config.filename
         self.stream_name = stream_name
+        self.update_counters = update_counters
         self._config = config
         self._session = Session(config)
         self._run_future = loop.create_task(self._run())
@@ -178,16 +187,23 @@ class _CaptureSession:
     async def _run(self):
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
             try:
+                self.update_counters(self._session.counters)
                 # Just passing self._session.join causes an exception in Python
                 # 3.5 because iscoroutinefunction doesn't work on functions
                 # defined by extensions. Hence the lambda.
-                await self._loop.run_in_executor(pool, lambda: self._session.join())
-                if self._session.n_heaps > 0 and self.filename is not None:
+                join_future = self._loop.run_in_executor(pool, lambda: self._session.join())
+                # Update the sensors once per second until termination
+                while not (await asyncio.wait([join_future], loop=self._loop, timeout=1.0))[0]:
+                    self.update_counters(self._session.counters)
+                await join_future   # To re-raise any exception
+                counters = self._session.counters
+                self.update_counters(counters)
+                if counters.heaps > 0 and self.filename is not None:
                     # Write the metadata to file
                     self._write_metadata()
                 _logger.info('Capture complete, %d heaps, of which %d dropped',
-                             self._session.n_total_heaps,
-                             self._session.n_total_heaps - self._session.n_heaps)
+                             counters.total_heaps,
+                             counters.total_heaps - counters.heaps)
             except Exception:
                 _logger.error("Capture threw exception", exc_info=True)
 
@@ -261,7 +277,8 @@ class CaptureServer:
             else:
                 self._config.filename = None
             self._capture = _CaptureSession(
-                self._config, self._args.telstate, self._args.stream_name, self._loop)
+                self._config, self._args.telstate, self._args.stream_name,
+                self.update_counters, self._loop)
         return self._capture.filename
 
     async def stop_capture(self) -> None:
@@ -273,6 +290,9 @@ class CaptureServer:
             # capture.
             if self._capture is capture:
                 self._capture = None
+
+    def update_counters(self, counters: SessionCounters) -> None:
+        pass   # Implemented by subclass
 
 
 class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
@@ -298,6 +318,32 @@ class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
     def __init__(self, args: argparse.Namespace, loop: asyncio.AbstractEventLoop) -> None:
         CaptureServer.__init__(self, args, loop)
         aiokatcp.DeviceServer.__init__(self, args.host, args.port, loop=loop)
+        sensors = [
+            Sensor(int, "input-heaps-total",
+                   "Number of payload heaps received from CBF in this session "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(int, "input-bytes-total",
+                   "Number of payload bytes received from CBF in this session "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(int, "input-missing-heaps-total",
+                   "Number of heaps we expected but never saw "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL,
+                   status_func=_warn_if_positive)
+        ]
+        for sensor in sensors:
+            self.sensors.add(sensor)
+
+    def update_counters(self, counters: SessionCounters) -> None:
+        timestamp = time.time()
+        self.sensors['input-heaps-total'].set_value(
+            counters.heaps, timestamp=timestamp)
+        self.sensors['input-bytes-total'].set_value(
+            counters.bytes, timestamp=timestamp)
+        self.sensors['input-missing-heaps-total'].set_value(
+            counters.total_heaps - counters.heaps, timestamp=timestamp)
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Start capture to file."""

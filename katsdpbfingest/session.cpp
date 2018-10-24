@@ -4,7 +4,6 @@
 #include <system_error>
 #include <sys/statfs.h>
 #include <H5Cpp.h>
-#include <boost/format.hpp>
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_thread_pool.h>
 #include <pybind11/pybind11.h>
@@ -73,10 +72,12 @@ void session::run_impl()
     spead2::ringbuffer<slice> &ring = recv.ring;
     spead2::ringbuffer<slice> &free_ring = recv.free_ring;
 
-    int channels = config.channels;
-    int channels_per_heap = config.channels_per_heap;
-    int spectra_per_heap = config.spectra_per_heap;
-    std::int64_t ticks_between_spectra = config.ticks_between_spectra;
+    const int channels = config.channels;
+    const int channels_per_heap = config.channels_per_heap;
+    const int spectra_per_heap = config.spectra_per_heap;
+    const std::int64_t ticks_between_spectra = config.ticks_between_spectra;
+    const std::size_t bytes_per_heap =
+        channels_per_heap * spectra_per_heap * 2 * sizeof(std::uint8_t);
 
     std::unique_ptr<stats_collector> stats;
     if (!config.stats_endpoint.address().is_unspecified())
@@ -87,6 +88,7 @@ void session::run_impl()
     std::unique_ptr<hdf5_writer> w;
     int fd = -1;
     std::size_t reserve_blocks = 0;
+    std::int64_t n_heaps = 0, n_total_heaps = 0;
     struct statfs stat;
     if (config.filename)
     {
@@ -100,7 +102,6 @@ void session::run_impl()
         reserve_blocks = (1024 * 1024 * 1024 + 1000 * slice_size) / stat.f_bsize;
     }
 
-    boost::format progress_formatter("dropped %1% of %2%");
     bool done = false;
     // Number of heaps in time between disk space checks
     constexpr std::int64_t check_cadence = 1000;
@@ -123,8 +124,6 @@ void session::run_impl()
                 n_total_heaps = total_heaps;
                 if (time_heaps >= next_check)
                 {
-                    progress_formatter % (n_total_heaps - n_heaps) % n_total_heaps;
-                    log_message(spead2::log_level::info, progress_formatter.str());
                     if (w)
                     {
                         if (fstatfs(fd, &stat) < 0)
@@ -140,6 +139,12 @@ void session::run_impl()
                     next_check = (time_heaps / check_cadence + 1) * check_cadence;
                 }
             }
+            {
+                std::lock_guard<std::mutex> lock(counters_mutex);
+                counters.heaps = n_heaps;
+                counters.bytes = n_heaps * bytes_per_heap;
+                counters.total_heaps = n_total_heaps;
+            }
             free_ring.push(std::move(s));
         }
         catch (spead2::ringbuffer_stopped &e)
@@ -150,18 +155,10 @@ void session::run_impl()
     recv.stop();
 }
 
-std::int64_t session::get_n_heaps() const
+session_counters session::get_counters() const
 {
-    if (run_future.valid())
-        throw std::runtime_error("cannot retrieve n_heaps while running");
-    return n_heaps;
-}
-
-std::int64_t session::get_n_total_heaps() const
-{
-    if (run_future.valid())
-        throw std::runtime_error("cannot retrieve n_total_heaps while running");
-    return n_total_heaps;
+    std::lock_guard<std::mutex> lock(counters_mutex);
+    return counters;
 }
 
 std::int64_t session::get_first_timestamp() const

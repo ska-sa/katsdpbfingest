@@ -73,12 +73,16 @@ PYBIND11_MODULE(_bf_ingest, m)
         .def("set_stats_endpoint", &session_config::set_stats_endpoint, "host"_a, "port"_a)
         .def("validate", &session_config::validate)
     ;
+    py::class_<session_counters>(m, "SessionCounters", "Heap counters for a live capture session")
+        .def_readwrite("heaps", &session_counters::heaps)
+        .def_readwrite("bytes", &session_counters::bytes)
+        .def_readwrite("total_heaps", &session_counters::total_heaps)
+    ;
     py::class_<session>(m, "Session", "Capture session")
         .def(py::init<const session_config &>(), "config"_a)
         .def("join", &session::join)
         .def("stop_stream", &session::stop_stream)
-        .def_property_readonly("n_heaps", &session::get_n_heaps)
-        .def_property_readonly("n_total_heaps", &session::get_n_total_heaps)
+        .def_property_readonly("counters", &session::get_counters)
         .def_property_readonly("first_timestamp", &session::get_first_timestamp)
     ;
 
