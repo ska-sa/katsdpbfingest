@@ -6,6 +6,7 @@ h5py
 ipaddress                 # via katsdptelstate
 katversion
 hiredis                   # via katsdptelstate
+msgpack                   # via katsdptelstate
 netifaces                 # via katsdptelstate
 numpy
 pkgconfig==1.2.2
