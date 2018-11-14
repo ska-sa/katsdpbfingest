@@ -52,7 +52,7 @@ USER root
 RUN ldconfig
 USER kat
 
-COPY --from=build --chown=kat:kat /home/kat/ve /home/kat/ve
+COPY --from=build --chown=kat:kat /home/kat/ve3 /home/kat/ve3
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 EXPOSE 2050
