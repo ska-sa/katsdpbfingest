@@ -14,7 +14,7 @@
 
 // TODO: only used for gil_scoped_release. Would be nice to find a way to avoid
 // having this file depend on pybind11.
-namespace py = pybind11; 
+namespace py = pybind11;
 
 bf_stream::~bf_stream()
 {
@@ -396,4 +396,3 @@ receiver::~receiver()
 {
     stop();
 }
-
