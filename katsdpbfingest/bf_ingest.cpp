@@ -37,6 +37,20 @@
 #include "common.h"
 #include "session.h"
 
+/* Work around pybind11 not supporting experimental::optional
+ * if <optional> exists. Needed for GCC 7.3 at least.
+ */
+#if !PYBIND11_HAS_EXP_OPTIONAL
+namespace pybind11
+{
+namespace detail
+{
+template<typename T> struct type_caster<std::experimental::optional<T>>
+    : public optional_caster<std::experimental::optional<T>> {};
+}
+}
+#endif
+
 namespace py = pybind11;
 
 static std::unique_ptr<spead2::log_function_python> spead2_logger;
