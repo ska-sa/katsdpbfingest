@@ -18,7 +18,7 @@ from aiokatcp import FailReply, Sensor
 import katsdpservices
 import katsdptelstate
 
-from ._bf_ingest import Session, SessionConfig, SessionCounters
+from ._bf_ingest import Session, SessionConfig, ReceiverCounters
 from . import utils, telescope_model, ar1_model, file_writer
 from .utils import Range
 import katsdpbfingest
@@ -148,7 +148,7 @@ class _CaptureSession:
         Task for the coroutine that waits for the C++ code and finalises
     """
     def __init__(self, config: SessionConfig, telstate: katsdptelstate.TelescopeState,
-                 stream_name: str, update_counters: Callable[[SessionCounters], None],
+                 stream_name: str, update_counters: Callable[[ReceiverCounters], None],
                  loop: asyncio.AbstractEventLoop) -> None:
         self._start_time = time.time()
         self._loop = loop
@@ -291,7 +291,7 @@ class CaptureServer:
             if self._capture is capture:
                 self._capture = None
 
-    def update_counters(self, counters: SessionCounters) -> None:
+    def update_counters(self, counters: ReceiverCounters) -> None:
         pass   # Implemented by subclass
 
 
@@ -331,17 +331,33 @@ class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
                    "Number of heaps we expected but never saw "
                    "(prometheus: counter)",
                    initial_status=Sensor.Status.NOMINAL,
+                   status_func=_warn_if_positive),
+            Sensor(int, "input-too-old-heaps-total",
+                   "Number of heaps rejected because they arrived too late "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL,
+                   status_func=_warn_if_positive),
+            Sensor(int, "input-incomplete-heaps-total",
+                   "Number of heaps rejected due to missing packets "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL,
+                   status_func=_warn_if_positive),
+            Sensor(int, "input-bad-metadata-heaps-total",
+                   "Number of heaps rejected due to bad timestamp or channel "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL,
                    status_func=_warn_if_positive)
         ]
         for sensor in sensors:
             self.sensors.add(sensor)
 
-    def update_counters(self, counters: SessionCounters) -> None:
+    def update_counters(self, counters: ReceiverCounters) -> None:
         timestamp = time.time()
-        self.sensors['input-heaps-total'].set_value(
-            counters.heaps, timestamp=timestamp)
-        self.sensors['input-bytes-total'].set_value(
-            counters.bytes, timestamp=timestamp)
+        for name in ['heaps', 'bytes', 'too-old-heaps', 'incomplete-heaps',
+                     'bad-metadata-heaps']:
+            sensor = self.sensors['input-{}-total'.format(name)]
+            value = getattr(counters, name.replace('-', '_'))
+            sensor.set_value(value, timestamp=timestamp)
         self.sensors['input-missing-heaps-total'].set_value(
             counters.total_heaps - counters.heaps, timestamp=timestamp)
 

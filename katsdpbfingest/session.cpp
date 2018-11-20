@@ -76,8 +76,6 @@ void session::run_impl()
     const int channels_per_heap = config.channels_per_heap;
     const int spectra_per_heap = config.spectra_per_heap;
     const std::int64_t ticks_between_spectra = config.ticks_between_spectra;
-    const std::size_t bytes_per_heap =
-        channels_per_heap * spectra_per_heap * 2 * sizeof(std::uint8_t);
 
     std::unique_ptr<stats_collector> stats;
     if (!config.stats_endpoint.address().is_unspecified())
@@ -88,7 +86,7 @@ void session::run_impl()
     std::unique_ptr<hdf5_writer> w;
     int fd = -1;
     std::size_t reserve_blocks = 0;
-    std::int64_t n_heaps = 0, n_total_heaps = 0;
+    std::int64_t n_total_heaps = 0;
     struct statfs stat;
     if (config.filename)
     {
@@ -112,7 +110,6 @@ void session::run_impl()
         try
         {
             slice s = ring.pop();
-            n_heaps += s.n_present;
             if (stats)
                 stats->add(s);
             if (w)
@@ -139,12 +136,6 @@ void session::run_impl()
                     next_check = (time_heaps / check_cadence + 1) * check_cadence;
                 }
             }
-            {
-                std::lock_guard<std::mutex> lock(counters_mutex);
-                counters.heaps = n_heaps;
-                counters.bytes = n_heaps * bytes_per_heap;
-                counters.total_heaps = n_total_heaps;
-            }
             free_ring.push(std::move(s));
         }
         catch (spead2::ringbuffer_stopped &e)
@@ -155,10 +146,9 @@ void session::run_impl()
     recv.stop();
 }
 
-session_counters session::get_counters() const
+receiver_counters session::get_counters() const
 {
-    std::lock_guard<std::mutex> lock(counters_mutex);
-    return counters;
+    return recv.get_counters();
 }
 
 std::int64_t session::get_first_timestamp() const
@@ -167,5 +157,3 @@ std::int64_t session::get_first_timestamp() const
         throw std::runtime_error("cannot retrieve first_timestamp while running");
     return recv.get_first_timestamp();
 }
-
-

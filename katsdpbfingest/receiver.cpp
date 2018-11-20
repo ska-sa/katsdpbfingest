@@ -1,6 +1,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <functional>
+#include <chrono>
+#include <mutex>
+#include <algorithm>
 #include <spead2/recv_stream.h>
 #include <spead2/recv_heap.h>
 #include <spead2/recv_udp_ibv.h>
@@ -171,7 +175,6 @@ slice *receiver::get_slice(std::int64_t timestamp, std::int64_t spectrum)
         slice *s = get(spectrum / spectra_per_heap);
         if (!s)
         {
-            log_message(spead2::log_level::warning, "Timestamp went backwards");
             return nullptr;
         }
         if (!s->data)
@@ -233,6 +236,11 @@ void receiver::flush(slice &s)
 {
     if (s.data)
     {
+        counters.heaps += s.n_present;
+        counters.bytes += s.n_present * payload_size;
+        std::int64_t total_heaps = (s.spectrum / spectra_per_heap + 1) * s.present.size();
+        counters.total_heaps = std::max(counters.total_heaps, total_heaps);
+
         // If any heaps got lost, fill them with zeros
         if (s.n_present != s.present.size())
         {
@@ -270,9 +278,13 @@ void receiver::heap_ready(const spead2::recv::heap &h)
     std::int64_t spectrum;
     std::size_t heap_offset, present_idx;
     if (!parse_timestamp_channel(timestamp, channel, spectrum, heap_offset, present_idx))
+    {
+        counters.bad_metadata_heaps++;
         return;
+    }
     if (data_item->length != payload_size)
     {
+        counters.bad_metadata_heaps++;
         log_format(spead2::log_level::warning, "bf_raw item has wrong length (%1% != %2%), discarding",
                    data_item->length, payload_size);
         return;
@@ -280,7 +292,12 @@ void receiver::heap_ready(const spead2::recv::heap &h)
 
     slice *s = get_slice(timestamp, spectrum);
     if (!s)
-        return;      // Chunk has been flushed already, or we have been stopped
+    {
+        // Chunk has been flushed already, or we have been stopped
+        if (state == state_t::DATA)
+            counters.too_old_heaps++;
+        return;
+    }
 
     std::uint8_t *ptr = s->data.get() + heap_offset;
     if (data_item->ptr != ptr)
@@ -293,6 +310,28 @@ void receiver::heap_ready(const spead2::recv::heap &h)
         s->n_present++;
         s->present[present_idx] = true;
     }
+}
+
+void receiver::refresh_counters(const boost::system::error_code &ec)
+{
+    using namespace std::placeholders;
+    if (ec == boost::asio::error::operation_aborted)
+        return;
+    else if (ec)
+        log_message(spead2::log_level::warning, "refresh_counters timer error");
+    counters_timer.expires_from_now(std::chrono::milliseconds(1));
+    counters_timer.async_wait(std::bind(&receiver::refresh_counters, this, _1));
+
+    auto stream_stats = stream.get_stats();
+    std::lock_guard<std::mutex> lock(counters_mutex);
+    counters_public = counters;
+    counters_public.incomplete_heaps = stream_stats.incomplete_heaps_evicted;
+}
+
+receiver_counters receiver::get_counters() const
+{
+    std::lock_guard<std::mutex> lock(counters_mutex);
+    return counters_public;
 }
 
 void receiver::stop_received()
@@ -319,6 +358,7 @@ void receiver::graceful_stop()
 
 void receiver::stop()
 {
+    counters_timer.cancel();
     /* Stop the ring first, so that we unblock the internals if they
      * are waiting for space in ring.
      */
@@ -337,6 +377,7 @@ receiver::receiver(const session_config &config)
     payload_size(2 * spectra_per_heap * channels_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
     stream(*this, std::max(1, config.channels / config.channels_per_heap) * config.live_heaps_per_substream),
+    counters_timer(worker.get_io_service()),
     ring(config.ring_slots),
     free_ring(window_size + config.ring_slots + 1)
 {
@@ -378,6 +419,7 @@ receiver::receiver(const session_config &config)
         stream.set_memory_allocator(std::move(allocator));
 
         emplace_readers();
+        refresh_counters(boost::system::error_code());
     }
     catch (std::exception)
     {

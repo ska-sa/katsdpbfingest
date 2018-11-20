@@ -2,6 +2,8 @@
 #define RECEIVER_H
 
 #include <cstdint>
+#include <boost/system/error_code.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <spead2/recv_stream.h>
 #include <spead2/recv_heap.h>
 #include <spead2/common_ringbuffer.h>
@@ -49,6 +51,19 @@ public:
     virtual pointer allocate(std::size_t size, void *hint) override;
 };
 
+struct receiver_counters
+{
+    std::int64_t heaps = 0;           ///< Heaps actually received
+    std::int64_t bytes = 0;           ///< Bytes of payload actually received
+    std::int64_t total_heaps = 0;     ///< Heaps we expected to receive (based on timestamps)
+    /// Heaps rejected because the timestamp was too far in the past
+    std::int64_t too_old_heaps = 0;
+    /// Heaps rejected due to missing packets
+    std::int64_t incomplete_heaps = 0;
+    /// Heaps rejected because the timestamp or channel was invalid
+    std::int64_t bad_metadata_heaps = 0;
+};
+
 /**
  * Collects data from the network, using custom stream classes. It has a
  * built-in thread pool with one thread, and runs almost entirely on that
@@ -94,6 +109,15 @@ private:
 
     spead2::thread_pool worker;
     bf_stream stream;
+
+    /// Mutex protecting @ref counters_public
+    mutable std::mutex counters_mutex;
+    /// Internal counters, updated without locking
+    receiver_counters counters;
+    /// Counters read by @ref get_counters, updated periodically
+    receiver_counters counters_public;
+    /// Timer used to periodically update @ref counters_public from @ref counters
+    boost::asio::steady_timer counters_timer;
 
     /// Create a single fully-allocated slice
     slice make_slice();
@@ -143,6 +167,9 @@ private:
     /// Flush a single slice to the ringbuffer, if it has data
     void flush(slice &s);
 
+    /// Update the public counters from the internal ones (called periodically)
+    void refresh_counters(const boost::system::error_code &ec);
+
     /// Called by bf_stream::heap_ready
     void heap_ready(const spead2::recv::heap &heap);
     /// Called by bf_stream::stop_received
@@ -179,6 +206,9 @@ public:
 
     /// Asynchronously stop, allowing buffered slices to flush
     void graceful_stop();
+
+    /// Retrieve current public counters
+    receiver_counters get_counters() const;
 };
 
 #endif // RECEIVER_H
