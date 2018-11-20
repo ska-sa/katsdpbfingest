@@ -179,6 +179,11 @@ slice *receiver::get_slice(std::int64_t timestamp, std::int64_t spectrum)
             *s = free_ring.pop();
             s->timestamp = timestamp;
             s->spectrum = spectrum;
+            s->n_present = 0;
+            // clear all the bits by resizing down to zero then back to original size
+            auto orig_size = s->present.size();
+            s->present.clear();
+            s->present.resize(orig_size);
         }
         return s;
     }
@@ -239,11 +244,6 @@ void receiver::flush(slice &s)
         ring.push(std::move(s));
     }
     s.spectrum = -1;
-    s.n_present = 0;
-    // Clear all the bits by resizing down to zero then back to original size
-    auto orig_size = s.present.size();
-    s.present.clear();
-    s.present.resize(orig_size);
 }
 
 void receiver::heap_ready(const spead2::recv::heap &h)
