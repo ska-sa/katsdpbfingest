@@ -19,7 +19,7 @@ import katsdpservices
 import katsdptelstate
 
 from ._bf_ingest import Session, SessionConfig, ReceiverCounters
-from . import utils, telescope_model, ar1_model, file_writer
+from . import utils, file_writer
 from .utils import Range
 import katsdpbfingest
 
@@ -160,7 +160,7 @@ class _CaptureSession:
         self._session = Session(config)
         self._run_future = loop.create_task(self._run())
 
-    def _write_metadata(self):
+    def _write_metadata(self) -> None:
         telstate = self._telstate
         view = utils.cbf_telstate_view(telstate, self.stream_name)
         try:
@@ -172,19 +172,15 @@ class _CaptureSession:
             return
         # self._start_time should always be earlier, except when a clock is wrong.
         start_time = min(first_timestamp, self._start_time)
-        antenna_mask = telstate.get('config', {}).get('antenna_mask', '').split(',')
-        model = ar1_model.create_model(antenna_mask)
-        model_data = telescope_model.TelstateModelData(model, telstate, start_time)
         h5file = h5py.File(self.filename, 'r+')
         with contextlib.closing(h5file):
-            file_writer.set_telescope_model(h5file, model_data)
             file_writer.set_telescope_state(h5file, telstate, start_timestamp=start_time)
             if self.stream_name is not None:
                 data_group = h5file['/Data']
                 data_group.attrs['stream_name'] = self.stream_name
                 data_group.attrs['channel_offset'] = self._config.channel_offset
 
-    async def _run(self):
+    async def _run(self) -> None:
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
             try:
                 self.update_counters(self._session.counters)
@@ -207,7 +203,7 @@ class _CaptureSession:
             except Exception:
                 _logger.error("Capture threw exception", exc_info=True)
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Shut down the stream and wait for the session to end. This
         is a coroutine.
         """
