@@ -344,16 +344,29 @@ class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
                    "Number of heaps rejected due to bad timestamp or channel "
                    "(prometheus: counter)",
                    initial_status=Sensor.Status.NOMINAL,
-                   status_func=_warn_if_positive)
+                   status_func=_warn_if_positive),
+            Sensor(int, "input-packets-total",
+                   "Total number of packets received (prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(int, "input-batches-total",
+                   "Number of batches of packets processed (prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(int, "input-max-batch",
+                   "Maximum number of packets processed in a batch (prometheus: gauge)",
+                   initial_status=Sensor.Status.NOMINAL)
         ]
         for sensor in sensors:
             self.sensors.add(sensor)
 
     def update_counters(self, counters: ReceiverCounters) -> None:
         timestamp = time.time()
-        for name in ['heaps', 'bytes', 'too-old-heaps', 'incomplete-heaps',
-                     'bad-metadata-heaps']:
+        for name in ['bytes', 'packets', 'batches',
+                     'heaps', 'too-old-heaps', 'incomplete-heaps', 'bad-metadata-heaps']:
             sensor = self.sensors['input-{}-total'.format(name)]
+            value = getattr(counters, name.replace('-', '_'))
+            sensor.set_value(value, timestamp=timestamp)
+        for name in ['max-batch']:
+            sensor = self.sensors['input-{}'.format(name)]
             value = getattr(counters, name.replace('-', '_'))
             sensor.set_value(value, timestamp=timestamp)
         self.sensors['input-missing-heaps-total'].set_value(

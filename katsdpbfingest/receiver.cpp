@@ -319,12 +319,15 @@ void receiver::refresh_counters(const boost::system::error_code &ec)
         return;
     else if (ec)
         log_message(spead2::log_level::warning, "refresh_counters timer error");
-    counters_timer.expires_from_now(std::chrono::milliseconds(1));
+    counters_timer.expires_from_now(std::chrono::milliseconds(10));
     counters_timer.async_wait(std::bind(&receiver::refresh_counters, this, _1));
 
     auto stream_stats = stream.get_stats();
     std::lock_guard<std::mutex> lock(counters_mutex);
     counters_public = counters;
+    counters_public.packets = stream_stats.packets;
+    counters_public.batches = stream_stats.batches;
+    counters_public.max_batch = stream_stats.max_batch;
     counters_public.incomplete_heaps = stream_stats.incomplete_heaps_evicted;
 }
 
