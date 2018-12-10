@@ -75,10 +75,10 @@ async def main() -> None:
         parser.error('--telstate is required')
     if args.stream_name is None:
         parser.error('--stream-name is required')
-    if args.file_base is None and args.stats is None:
-        parser.error('At least one of --file-base and --stats must be given')
     if args.log_level is not None:
         logging.root.setLevel(args.log_level.upper())
+    if args.file_base is None and args.stats is None:
+        logging.warning('Neither --file-base nor --stats was given; nothing useful will happen')
     if args.file_base is not None and not os.access(args.file_base, os.W_OK):
         logging.error('Target directory (%s) is not writable', args.file_base)
         sys.exit(1)
