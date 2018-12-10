@@ -1,4 +1,4 @@
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-build as build
+FROM sdp-docker-registry.kat.ac.za:5000/docker-base-build:18.04 as build
 MAINTAINER Bruce Merry "bmerry@ska.ac.za"
 
 # Build libhdf5 from source so that the direct I/O VFD can be used.
@@ -44,7 +44,7 @@ RUN pip check
 
 #######################################################################
 
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-runtime
+FROM sdp-docker-registry.kat.ac.za:5000/docker-base-runtime:18.04
 MAINTAINER Bruce Merry "bmerry@ska.ac.za"
 
 COPY --from=build /libhdf5-install /
