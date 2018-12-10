@@ -11,7 +11,7 @@ import katsdptelstate.endpoint
 import spead2
 import katsdpservices
 
-from katsdpbfingest.bf_ingest_server import KatcpCaptureServer
+from katsdpbfingest.bf_ingest_server import KatcpCaptureServer, SessionConfig
 from katsdpbfingest.utils import Range
 
 
@@ -26,6 +26,7 @@ def on_shutdown(server: KatcpCaptureServer) -> None:
 async def main() -> None:
     katsdpservices.setup_logging()
     katsdpservices.setup_restart()
+    defaults = SessionConfig('')
     parser = katsdpservices.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
@@ -57,6 +58,12 @@ async def main() -> None:
     parser.add_argument(
         '--ibv', action='store_true',
         help='Use libibverbs when possible')
+    parser.add_argument(
+        '--buffer-size', type=int, metavar='BYTES', default=defaults.buffer_size,
+        help='Network buffer size [%(default)s]')
+    parser.add_argument(
+        '--max-packet', type=int, metavar='BYTES', default=defaults.max_packet,
+        help='Maximum packet size (UDP payload) [%(default)s]')
     parser.add_argument(
         '--stats', type=katsdptelstate.endpoint.endpoint_parser(7149), metavar='ENDPOINT',
         help='Send statistics to a signal display server at this address')

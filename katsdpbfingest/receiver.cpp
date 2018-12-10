@@ -101,7 +101,7 @@ void receiver::emplace_readers()
                    endpoints_str.str(), config.interface_address);
         stream.emplace_reader<spead2::recv::udp_ibv_reader>(
             config.endpoints, config.interface_address,
-            spead2::recv::udp_ibv_reader::default_max_size,
+            config.max_packet,
             config.buffer_size,
             config.comp_vector);
     }
@@ -114,7 +114,7 @@ void receiver::emplace_readers()
                        endpoints_str.str(), config.interface_address);
             for (const auto &endpoint : config.endpoints)
                 stream.emplace_reader<spead2::recv::udp_reader>(
-                    endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size,
+                    endpoint, config.max_packet, config.buffer_size,
                     config.interface_address);
         }
         else
@@ -122,7 +122,7 @@ void receiver::emplace_readers()
             log_format(spead2::log_level::info, "Listening on %1%", endpoints_str.str());
             for (const auto &endpoint : config.endpoints)
                 stream.emplace_reader<spead2::recv::udp_reader>(
-                    endpoint, spead2::recv::udp_reader::default_max_size, config.buffer_size);
+                    endpoint, config.max_packet, config.buffer_size);
         }
     }
 }

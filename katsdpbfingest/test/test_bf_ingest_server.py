@@ -102,6 +102,8 @@ class TestCaptureServer(asynctest.TestCase):
             file_base=self.tmpdir,
             direct_io=False,
             ibv=False,
+            buffer_size=32 * 1024 * 1024,
+            max_packet=9216,
             stream_name='i0_tied_array_channelised_voltage_0x',
             affinity=None,
             interface='lo',

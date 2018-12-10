@@ -67,6 +67,8 @@ def _create_session_config(args: argparse.Namespace) -> SessionConfig:
         Command-line arguments. See :class:`CaptureServer`.
     """
     config = SessionConfig('')  # Real filename supplied later
+    config.max_packet = args.max_packet
+    config.buffer_size = args.buffer_size
     if args.interface is not None:
         config.interface_address = katsdpservices.get_interface_address(args.interface)
     config.ibv = args.ibv

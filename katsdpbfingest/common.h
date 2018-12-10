@@ -9,6 +9,7 @@
 #include <boost/asio.hpp>
 #include <boost/format.hpp>
 #include <spead2/common_logging.h>
+#include <spead2/recv_udp_ibv.h>
 
 // Forward-declare to avoid sucking in pybind11.h
 namespace pybind11 { class object; }
@@ -176,6 +177,7 @@ struct session_config
     std::vector<boost::asio::ip::udp::endpoint> endpoints;
     boost::asio::ip::address interface_address;
 
+    std::size_t max_packet = spead2::recv::udp_ibv_reader::default_max_size;
     std::size_t buffer_size = 32 * 1024 * 1024;
     int live_heaps_per_substream = 2;
     int ring_slots = 128;
