@@ -416,7 +416,6 @@ receiver::receiver(const session_config &config)
         for (std::size_t i = 0; i < window_size + config.ring_slots + 1; i++)
             free_ring.push(make_slice());
 
-        stream.set_memcpy(spead2::MEMCPY_NONTEMPORAL);
         std::shared_ptr<spead2::memory_allocator> allocator =
             std::make_shared<bf_raw_allocator>(*this);
         stream.set_memory_allocator(std::move(allocator));
