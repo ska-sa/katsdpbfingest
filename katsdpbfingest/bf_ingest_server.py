@@ -17,6 +17,7 @@ from aiokatcp import FailReply, Sensor
 
 import katsdpservices
 import katsdptelstate
+from katsdptelstate.endpoint import endpoints_to_str
 
 from ._bf_ingest import Session, SessionConfig, ReceiverCounters
 from . import utils, file_writer
@@ -107,8 +108,10 @@ def _create_session_config(args: argparse.Namespace) -> SessionConfig:
 
     endpoint_range = np.s_[args.channels.start // channels_per_endpoint:
                            args.channels.stop // channels_per_endpoint]
-    for endpoint in args.cbf_spead[endpoint_range]:
+    endpoints = args.cbf_spead[endpoint_range]
+    for endpoint in endpoints:
         config.add_endpoint(socket.gethostbyname(endpoint.host), endpoint.port)
+    config.endpoints_str = endpoints_to_str(endpoints)
     if args.stats is not None:
         config.set_stats_endpoint(args.stats.host, args.stats.port)
         config.stats_int_time = args.stats_int_time

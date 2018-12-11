@@ -85,20 +85,11 @@ slice receiver::make_slice()
 
 void receiver::emplace_readers()
 {
-    std::ostringstream endpoints_str;
-    bool first = true;
-    for (const auto &endpoint : config.endpoints)
-    {
-        if (!first)
-            endpoints_str << ',';
-        first = false;
-        endpoints_str << endpoint;
-    }
 #if SPEAD2_USE_IBV
     if (use_ibv)
     {
         log_format(spead2::log_level::info, "Listening on %1% with interface %2% using ibverbs",
-                   endpoints_str.str(), config.interface_address);
+                   config.endpoints_str, config.interface_address);
         stream.emplace_reader<spead2::recv::udp_ibv_reader>(
             config.endpoints, config.interface_address,
             config.max_packet,
@@ -111,7 +102,7 @@ void receiver::emplace_readers()
         if (!config.interface_address.is_unspecified())
         {
             log_format(spead2::log_level::info, "Listening on %1% with interface %2%",
-                       endpoints_str.str(), config.interface_address);
+                       config.endpoints_str, config.interface_address);
             for (const auto &endpoint : config.endpoints)
                 stream.emplace_reader<spead2::recv::udp_reader>(
                     endpoint, config.max_packet, config.buffer_size,
@@ -119,7 +110,7 @@ void receiver::emplace_readers()
         }
         else
         {
-            log_format(spead2::log_level::info, "Listening on %1%", endpoints_str.str());
+            log_format(spead2::log_level::info, "Listening on %1%", config.endpoints_str);
             for (const auto &endpoint : config.endpoints)
                 stream.emplace_reader<spead2::recv::udp_reader>(
                     endpoint, config.max_packet, config.buffer_size);

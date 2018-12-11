@@ -175,6 +175,7 @@ struct session_config
 {
     std::experimental::optional<std::string> filename;
     std::vector<boost::asio::ip::udp::endpoint> endpoints;
+    std::string endpoints_str;   ///< Human-readable version of endpoints
     boost::asio::ip::address interface_address;
 
     std::size_t max_packet = spead2::recv::udp_ibv_reader::default_max_size;
