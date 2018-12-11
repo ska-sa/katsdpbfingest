@@ -62,7 +62,7 @@ private:
     double scale_factor_timestamp;
 
     std::int64_t interval;   ///< transmit interval, in timestamp units
-    std::int64_t start_timestamp = -1; //</ first timestamp of current accumulation
+    std::int64_t start_timestamp = -1; ///< first timestamp of current accumulation
 
     boost::asio::io_service io_service;
     spead2::send::udp_stream stream;
