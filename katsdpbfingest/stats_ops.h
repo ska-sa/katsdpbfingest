@@ -7,6 +7,10 @@
  * and just use the target_clones attribute, but we're targeting GCC 5.4.
  */
 
+// Python extensions are built with -fwrapv, but it interferes with vectorisation
+#pragma GCC push_options
+#pragma GCC optimize("no-wrapv")
+
 #ifdef TARGET
 [[gnu::target(TARGET)]]
 #endif
@@ -38,3 +42,5 @@ uint16_t count_saturated(int N, const int8_t *data)
     }
     return ans;
 }
+
+#pragma GCC pop_options
