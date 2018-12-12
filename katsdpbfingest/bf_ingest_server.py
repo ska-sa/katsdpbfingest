@@ -364,13 +364,12 @@ class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
 
     def update_counters(self, counters: ReceiverCounters) -> None:
         timestamp = time.time()
-        for name in ['bytes', 'packets', 'batches',
-                     'heaps', 'too-old-heaps', 'incomplete-heaps', 'bad-metadata-heaps']:
-            sensor = self.sensors['input-{}-total'.format(name)]
-            value = getattr(counters, name.replace('-', '_'))
-            sensor.set_value(value, timestamp=timestamp)
-        for name in ['max-batch']:
-            sensor = self.sensors['input-{}'.format(name)]
+        counter_sensors = ['bytes', 'packets', 'batches',
+                           'heaps', 'too-old-heaps', 'incomplete-heaps', 'bad-metadata-heaps']
+        gauge_sensors = ['max-batch']
+        for name in counter_sensors + gauge_sensors:
+            sensor_name = 'input-{}{}'.format(name, '' if name in gauge_sensors else '-total')
+            sensor = self.sensors[sensor_name]
             value = getattr(counters, name.replace('-', '_'))
             sensor.set_value(value, timestamp=timestamp)
         self.sensors['input-missing-heaps-total'].set_value(
