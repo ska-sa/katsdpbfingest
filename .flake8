@@ -4,3 +4,5 @@ max-line-length = 100
 ignore =
     # whitespace before ':' - flake8 doesn't handle slices properly
     E203
+    # line break after binary operator
+    W504
