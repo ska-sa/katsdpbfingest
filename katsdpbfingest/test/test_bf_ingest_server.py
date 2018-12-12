@@ -23,7 +23,6 @@ import katsdptelstate
 from katsdptelstate import endpoint
 
 from katsdpbfingest import bf_ingest_server, _bf_ingest
-from ..utils import Range
 
 
 DATA_LOST = 1 << 3
@@ -96,23 +95,18 @@ class TestCaptureServer(asynctest.TestCase):
         telstate = katsdptelstate.TelescopeState()
         for key, value in attrs.items():
             telstate.add(key, value, immutable=True)
-        self.args = argparse.Namespace(
-            cbf_spead=self.endpoints,
-            channels=Range(128, 768),
-            file_base=self.tmpdir,
-            direct_io=False,
-            ibv=False,
-            buffer_size=32 * 1024 * 1024,
-            max_packet=9216,
-            stream_name='i0_tied_array_channelised_voltage_0x',
-            affinity=None,
-            interface='lo',
-            telstate=telstate,
-            stats=endpoint.Endpoint('239.102.3.0', 7149),
-            stats_int_time=(self.heaps_per_stats *
-                            self.ticks_between_spectra * self.spectra_per_heap /
-                            self.adc_sample_rate),
-            stats_interface='lo')
+        stats_int_time = (self.heaps_per_stats * self.ticks_between_spectra *
+                          self.spectra_per_heap / self.adc_sample_rate)
+        self.args = bf_ingest_server.parse_args([
+            '--cbf-spead=' + endpoint.endpoints_to_str(self.endpoints),
+            '--channels=128:768',
+            '--file-base=' + self.tmpdir,
+            '--stream-name=i0_tied_array_channelised_voltage_0x',
+            '--interface=lo',
+            '--stats=239.102.3.0:7149',
+            '--stats-int-time={}'.format(stats_int_time),
+            '--stats-interface=lo'],
+            argparse.Namespace(telstate=telstate))
         self.loop = asyncio.get_event_loop()
 
     async def test_manual_stop_no_data(self) -> None:
