@@ -171,7 +171,9 @@ private:
     void flush(slice &s);
 
     /// Update the public counters from the internal ones (called periodically)
-    void refresh_counters(const boost::system::error_code &ec);
+    void refresh_counters();
+    /// Run @refrefresh_counters and schedule self to run again
+    void refresh_counters_periodic(const boost::system::error_code &ec);
 
     /// Called by bf_stream::heap_ready
     void heap_ready(const spead2::recv::heap &heap);

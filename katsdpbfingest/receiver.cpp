@@ -303,7 +303,7 @@ void receiver::heap_ready(const spead2::recv::heap &h)
     }
 }
 
-void receiver::refresh_counters(const boost::system::error_code &ec)
+void receiver::refresh_counters_periodic(const boost::system::error_code &ec)
 {
     using namespace std::placeholders;
     if (ec == boost::asio::error::operation_aborted)
@@ -311,8 +311,12 @@ void receiver::refresh_counters(const boost::system::error_code &ec)
     else if (ec)
         log_message(spead2::log_level::warning, "refresh_counters timer error");
     counters_timer.expires_from_now(std::chrono::milliseconds(10));
-    counters_timer.async_wait(std::bind(&receiver::refresh_counters, this, _1));
+    counters_timer.async_wait(std::bind(&receiver::refresh_counters_periodic, this, _1));
+    refresh_counters();
+}
 
+void receiver::refresh_counters()
+{
     auto stream_stats = stream.get_stats();
     std::lock_guard<std::mutex> lock(counters_mutex);
     counters_public = counters;
@@ -342,6 +346,8 @@ void receiver::stop_received()
         }
     }
     ring.stop();
+    counters_timer.cancel();
+    refresh_counters();
     state = state_t::STOP;
 }
 
@@ -352,7 +358,6 @@ void receiver::graceful_stop()
 
 void receiver::stop()
 {
-    counters_timer.cancel();
     /* Stop the ring first, so that we unblock the internals if they
      * are waiting for space in ring.
      */
@@ -412,7 +417,8 @@ receiver::receiver(const session_config &config)
         stream.set_memory_allocator(std::move(allocator));
 
         emplace_readers();
-        refresh_counters(boost::system::error_code());
+        // Start periodic updates
+        refresh_counters_periodic(boost::system::error_code());
     }
     catch (std::exception)
     {
