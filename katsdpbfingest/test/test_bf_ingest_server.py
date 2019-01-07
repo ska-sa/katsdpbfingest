@@ -244,7 +244,7 @@ class TestCaptureServer(asynctest.TestCase):
         assert_equal(n_heaps // self.heaps_per_stats + 2, len(heaps))
         assert_true(heaps[0].is_start_of_stream())
         assert_true(heaps[-1].is_end_of_stream())
-        ig = spead2.ItemGroup()
+        ig = spead2.send.ItemGroup()
         spectrum = 0
         spectra_per_stats = self.heaps_per_stats * self.spectra_per_heap
         for heap in heaps[1:-1]:
