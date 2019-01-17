@@ -77,15 +77,20 @@ static aligned_ptr<T> make_aligned(std::size_t elements)
 std::vector<int> affinity_vector(int affinity);
 
 /**
- * Storage for all the heaps that share a timestamp.
+ * Storage for a collection of heaps.
+ *
+ * A slice is a rectangle in the time-frequency space. It currently covers the
+ * whole of the frequency axis, and some fixed number of heaps in the time
+ * axis. It corresponds to the HDF5 chunk size for the data, so needs to be
+ * large enough to be spread across the stripes in a RAID.
  */
 struct slice
 {
-    std::int64_t timestamp = -1;       ///< Timestamp from the heap
-    std::int64_t spectrum = -1;        ///< Number of spectra since start
+    std::int64_t timestamp = -1;       ///< Timestamp (of the first heap)
+    std::int64_t spectrum = -1;        ///< Number of spectra since start (for first heap)
     unsigned int n_present = 0;        ///< Number of 1 bits in @a present
     aligned_ptr<std::uint8_t> data;    ///< Payload: channel-major, time-minor
-    std::vector<bool> present;         ///< Bitmask of present heaps
+    std::vector<bool> present;         ///< Bitmask of present heaps: channel-major, time-minor
 };
 
 /**
@@ -195,6 +200,8 @@ struct session_config
     int channels = -1;
     // Time (in seconds) over which to accumulate stats
     double stats_int_time = 1.0;
+    // Number of heaps accumulated into an HDF5 chunks
+    int heaps_per_slice_time = -1;
 
     // Metadata derived from telescope state.
     std::int64_t ticks_between_spectra = -1;

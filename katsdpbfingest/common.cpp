@@ -85,5 +85,7 @@ const session_config &session_config::validate() const
         throw std::invalid_argument("center_freq <= 0");
     if (scale_factor_timestamp <= 0)
         throw std::invalid_argument("scale_factor_timestamp <= 0");
+    if (heaps_per_slice_time <= 0)
+        throw std::invalid_argument("heaps_per_slice_time <= 0");
     return *this;
 }

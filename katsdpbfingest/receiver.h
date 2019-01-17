@@ -9,6 +9,7 @@
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_memory_allocator.h>
 #include "common.h"
+#include "units.h"
 
 class receiver;
 
@@ -67,6 +68,36 @@ struct receiver_counters
     std::int64_t bad_metadata_heaps = 0;
 };
 
+namespace units
+{
+    // _t suffix means time axis, _f suffix means frequency axis
+    struct heaps_t { static const char *name() { return "heaps"; } };
+    struct heaps_f { static const char *name() { return "heaps"; } };
+    struct slices_t { static const char *name() { return "slices"; } };
+    struct slices_f { static const char *name() { return "slices"; } };
+    struct spectra { static const char *name() { return "spectra"; } };
+    struct channels { static const char *name() { return "channels"; } };
+    struct bytes { static const char *name() { return "bytes"; } };
+    struct ticks { static const char *name() { return "ticks"; } };
+
+    typedef unit_system<std::int64_t, bytes, spectra, heaps_t, slices_t> time_system;
+    typedef unit_system<std::int64_t, channels, heaps_f, slices_f> freq_system;
+    typedef unit_system<std::int64_t, ticks, spectra, heaps_t> timestamp_system;
+}
+
+// Some shortcuts for quantities of each unit
+namespace q
+{
+    typedef quantity<std::int64_t, units::heaps_t> heaps_t;
+    typedef quantity<std::int64_t, units::heaps_f> heaps_f;
+    typedef quantity<std::int64_t, units::slices_t> slices_t;
+    typedef quantity<std::int64_t, units::slices_f> slices_f;
+    typedef quantity<std::int64_t, units::spectra> spectra;
+    typedef quantity<std::int64_t, units::channels> channels;
+    typedef quantity<std::int64_t, units::bytes> bytes;
+    typedef quantity<std::int64_t, units::ticks> ticks;
+}
+
 /**
  * Collects data from the network, using custom stream classes. It has a
  * built-in thread pool with one thread, and runs almost entirely on that
@@ -95,12 +126,11 @@ private:
     static constexpr std::size_t window_size = 64;
 
     // Metadata copied from or computed from the session_config
-    const int channel_offset;
-    const int channels;
-    const std::int64_t ticks_between_spectra;
-    const int spectra_per_heap;
-    const int channels_per_heap;
-    const std::size_t payload_size;
+    const q::channels channel_offset;
+    const units::time_system time_sys;
+    const units::freq_system freq_sys;
+    const units::timestamp_system timestamp_sys;
+    const q::bytes payload_size;
 
     // Hard-coded item IDs
     static constexpr int bf_raw_id = 0x5000;
@@ -108,7 +138,7 @@ private:
     static constexpr int frequency_id = 0x4103;
 
     state_t state = state_t::DATA;
-    std::int64_t first_timestamp = -1;
+    q::ticks first_timestamp{-1};
 
     spead2::thread_pool worker;
     bf_stream stream;
@@ -144,8 +174,9 @@ private:
      * @retval false otherwise, and a message is logged
      */
     bool parse_timestamp_channel(
-        std::int64_t timestamp, int channel,
-        std::int64_t &spectrum, std::size_t &heap_offset, std::size_t &present_idx);
+        q::ticks timestamp, q::channels channel,
+        q::spectra &spectrum,
+        q::bytes &heap_offset, std::size_t &present_idx);
 
     /**
      * Obtain a pointer to an allocated slice. It returns @c nullptr if the
@@ -153,7 +184,7 @@ private:
      *
      * This can block if @c free_ring is empty.
      */
-    slice *get_slice(std::int64_t timestamp, std::int64_t spectrum);
+    slice *get_slice(q::ticks timestamp, q::spectra spectrum);
 
     /**
      * Find space within a slice. This is the backing implementation for
@@ -166,6 +197,12 @@ private:
      *          valid data heap.
      */
     std::uint8_t *allocate(std::size_t size, const spead2::recv::packet_header &packet);
+
+    /**
+     * Copy contents of one packet to a slice.
+     */
+    void packet_memcpy(const spead2::memory_allocator::pointer &allocated,
+                       const spead2::recv::packet_header &packet);
 
     /// Flush a single slice to the ringbuffer, if it has data
     void flush(slice &s);
@@ -197,7 +234,7 @@ public:
      * Retrieve first timestamp, or -1 if no data was received.
      * It is only valid to call this once the receiver has been stopped.
      */
-    std::int64_t get_first_timestamp() const
+    q::ticks get_first_timestamp() const
     {
         assert(state == state_t::STOP);
         return first_timestamp;

@@ -155,5 +155,5 @@ std::int64_t session::get_first_timestamp() const
 {
     if (run_future.valid())
         throw std::runtime_error("cannot retrieve first_timestamp while running");
-    return recv.get_first_timestamp();
+    return recv.get_first_timestamp().get();
 }

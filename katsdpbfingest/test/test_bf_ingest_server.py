@@ -55,6 +55,7 @@ class TestSession:
         config.bandwidth = 856e6
         config.center_freq = 1284e6
         config.scale_factor_timestamp = 1712e6
+        config.heaps_per_slice_time = 1
         _bf_ingest.Session(config)
 
 
