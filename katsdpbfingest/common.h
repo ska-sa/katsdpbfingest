@@ -10,6 +10,7 @@
 #include <boost/format.hpp>
 #include <spead2/common_logging.h>
 #include <spead2/recv_udp_ibv.h>
+#include "units.h"
 
 // Forward-declare to avoid sucking in pybind11.h
 namespace pybind11 { class object; }
@@ -228,5 +229,87 @@ struct session_config
     // Throws invalid_value if not.
     const session_config &validate() const;
 };
+
+namespace units
+{
+    template<typename U>
+    struct time_unit
+    {
+        typedef U base;
+        static const char *name() { return U::name(); }
+    };
+
+    template<typename U>
+    struct freq_unit
+    {
+        typedef U base;
+        static const char *name() { return U::name(); }
+    };
+
+    template<typename Base>
+    struct twod    // base class for units with time and frequency axes
+    {
+        typedef time_unit<Base> time;
+        typedef freq_unit<Base> freq;
+    };
+
+    // _t suffix means time axis, _f suffix means frequency axis
+    struct heaps : public twod<heaps> { static const char *name() { return "heaps"; } };
+    struct slices : public twod<slices> { static const char *name() { return "slices"; } };
+    struct chunks : public twod<chunks> { static const char *name() { return "chunks"; } };
+    struct spectra { static const char *name() { return "spectra"; } };
+    struct channels { static const char *name() { return "channels"; } };
+    struct bytes { static const char *name() { return "bytes"; } };
+    struct ticks { static const char *name() { return "ticks"; } };
+}
+
+// Some shortcuts for quantities of each unit
+namespace q
+{
+    typedef quantity<std::int64_t, units::heaps::time> heaps_t;
+    typedef quantity<std::int64_t, units::heaps::freq> heaps_f;
+    typedef quantity<std::int64_t, units::heaps> heaps;
+    typedef quantity<std::int64_t, units::slices::time> slices_t;
+    typedef quantity<std::int64_t, units::slices::freq> slices_f;
+    typedef quantity<std::int64_t, units::slices> slices;
+    typedef quantity<std::int64_t, units::chunks::time> chunks_t;
+    typedef quantity<std::int64_t, units::chunks::freq> chunks_f;
+    typedef quantity<std::int64_t, units::chunks> chunks;
+    typedef quantity<std::int64_t, units::spectra> spectra;
+    typedef quantity<std::int64_t, units::channels> channels;
+    typedef quantity<std::int64_t, units::bytes> bytes;
+    typedef quantity<std::int64_t, units::ticks> ticks;
+}
+
+template<typename Base>
+struct unit_product<units::time_unit<Base>, units::freq_unit<Base>>
+{
+    typedef Base type;
+};
+
+template<typename Base>
+struct unit_product<units::freq_unit<Base>, units::time_unit<Base>>
+{
+    typedef Base type;
+};
+
+template<typename T1, typename U1, typename T2, typename U2>
+inline typename std::enable_if<std::is_same<typename U1::time_base, typename U2::freq_base>::value,
+                               quantity<decltype(std::declval<T1>() * std::declval<T2>()),
+                                        typename U1::time_base>>::type
+operator*(const quantity<T1, U1> &a, const quantity<T2, U2> &b)
+{
+    return make_quantity<typename U1::time_base>(a.get() * b.get());
+}
+
+template<typename T1, typename U1, typename T2, typename U2>
+inline typename std::enable_if<std::is_same<typename U1::freq_base, typename U2::time_base>::value,
+                               quantity<decltype(std::declval<T1>() * std::declval<T2>()),
+                                        typename U2::time_base>>::type
+operator*(const quantity<T1, U1> &a, const quantity<T2, U2> &b)
+{
+    return make_quantity<typename U2::time_base>(a.get() * b.get());
+}
+
 
 #endif // COMMON_H

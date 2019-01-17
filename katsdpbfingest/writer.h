@@ -8,13 +8,14 @@
 class hdf5_bf_raw_writer
 {
 private:
-    const int channels;
-    const int spectra_per_heap;
+    const unit_system<std::int64_t, units::channels, units::slices::freq> freq_sys;
+    const unit_system<std::int64_t, units::bytes, units::spectra, units::slices::time> time_sys;
+    q::bytes chunk_bytes;
     H5::DataSet dataset;
 
 public:
     hdf5_bf_raw_writer(H5::Group &parent, int channels,
-                       int spectra_per_heap,
+                       int spectra_per_slice,
                        const char *name);
 
     void add(const slice &c);
@@ -31,14 +32,13 @@ private:
 
     void flush();
 public:
-    const int spectra_per_heap;
-    const std::uint64_t ticks_between_spectra;
+    const unit_system<std::int64_t, units::ticks, units::spectra, units::heaps::time> timestamp_sys;
 
     hdf5_timestamps_writer(H5::Group &parent, int spectra_per_heap,
                            std::uint64_t ticks_between_spectra, const char *name);
     ~hdf5_timestamps_writer();
     // Add a heap's worth of timestamps
-    void add(std::uint64_t timestamp);
+    void add(q::ticks timestamp);
 };
 
 /**
@@ -47,10 +47,10 @@ public:
  */
 struct flags_chunk
 {
-    std::int64_t spectrum = -1;
+    q::spectra spectrum{-1};
     aligned_ptr<std::uint8_t> data;
 
-    explicit flags_chunk(std::size_t size);
+    explicit flags_chunk(q::heaps size);
 };
 
 class hdf5_flags_writer : private window<flags_chunk, hdf5_flags_writer>
@@ -58,17 +58,19 @@ class hdf5_flags_writer : private window<flags_chunk, hdf5_flags_writer>
 private:
     friend class window<flags_chunk, hdf5_flags_writer>;
 
-    std::size_t spectra_per_heap;
-    std::size_t heaps_per_slice;
-    std::size_t heaps_per_chunk;
-    std::size_t slices_per_chunk;
-    hsize_t n_slices = 0;    ///< Total slices seen (including skipped ones)
+    const unit_system<std::int64_t, units::bytes, units::heaps::time, units::slices::time, units::chunks::time> time_sys;
+    const unit_system<std::int64_t, units::heaps::freq, units::slices::freq, units::chunks::freq> freq_sys;
+    const unit_system<std::int64_t, units::spectra, units::heaps::time, units::slices::time, units::chunks::time> timestamp_sys;
+    const q::bytes chunk_bytes;
+    q::slices_t n_slices{0};    ///< Total slices seen (including skipped ones)
     H5::DataSet dataset;
 
-    static std::size_t compute_chunk_size(int heaps_per_slice);
+    static q::slices compute_chunk_size_slices(q::heaps heaps_per_slice);
+    static q::heaps compute_chunk_size_heaps(q::heaps heaps_per_slice);
     void flush(flags_chunk &chunk);
 public:
-    hdf5_flags_writer(H5::Group &parent, int heaps_per_slice, int spectra_per_heap,
+    hdf5_flags_writer(H5::Group &parent, int heaps_per_slice_freq,
+                      int spectra_per_heap, int heaps_per_slice_time,
                       const char *name);
     ~hdf5_flags_writer();
     void add(const slice &s);
@@ -77,7 +79,7 @@ public:
 class hdf5_writer
 {
 private:
-    std::int64_t past_end_timestamp = -1;
+    q::ticks past_end_timestamp{-1};
     H5::H5File file;
     H5::Group group;
     hdf5_bf_raw_writer bf_raw;
@@ -88,7 +90,8 @@ private:
 
 public:
     hdf5_writer(const std::string &filename, bool direct,
-                int channels, int channels_per_heap, int spectra_per_heap,
+                int channels, int channels_per_heap,
+                int spectra_per_heap, int heaps_per_slice_time,
                 std::int64_t ticks_between_spectra);
     void add(const slice &s);
     int get_fd() const;

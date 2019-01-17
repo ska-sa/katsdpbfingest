@@ -75,11 +75,11 @@ slice receiver::make_slice()
 {
     slice s;
     auto slice_size =
-        time_sys.scale_factor<units::slices_t, units::bytes>()
-        * freq_sys.scale_factor<units::slices_f, units::channels>();
+        time_sys.scale_factor<units::slices::time, units::bytes>()
+        * freq_sys.scale_factor<units::slices::freq, units::channels>();
     auto present_size =
-        time_sys.scale_factor<units::slices_t, units::heaps_t>()
-        * freq_sys.scale_factor<units::slices_f, units::heaps_f>();
+        time_sys.scale_factor<units::slices::time, units::heaps::time>()
+        * freq_sys.scale_factor<units::slices::freq, units::heaps::freq>();
     s.data = make_aligned<std::uint8_t>(slice_size);
     // Fill the data just to pre-fault it
     std::memset(s.data.get(), 0, slice_size);
@@ -125,7 +125,7 @@ void receiver::emplace_readers()
 bool receiver::parse_timestamp_channel(
     q::ticks timestamp, q::channels channel,
     q::spectra &spectrum,
-    q::bytes &heap_offset, std::size_t &present_idx)
+    q::bytes &heap_offset, q::heaps &present_idx)
 {
     if (timestamp < first_timestamp)
     {
@@ -135,9 +135,9 @@ bool receiver::parse_timestamp_channel(
     }
     bool have_first = (first_timestamp != q::ticks(-1));
     q::ticks rel = !have_first ? q::ticks(0) : timestamp - first_timestamp;
-    q::ticks one_heap_ts = timestamp_sys.convert_one<units::heaps_t, units::ticks>();
-    q::channels one_slice_f = freq_sys.convert_one<units::slices_f, units::channels>();
-    q::channels one_heap_f = freq_sys.convert_one<units::heaps_f, units::channels>();
+    q::ticks one_heap_ts = timestamp_sys.convert_one<units::heaps::time, units::ticks>();
+    q::channels one_slice_f = freq_sys.convert_one<units::slices::freq, units::channels>();
+    q::channels one_heap_f = freq_sys.convert_one<units::heaps::freq, units::channels>();
     if (rel % one_heap_ts)
     {
         log_format(spead2::log_level::warning, "timestamp %1% is not properly aligned to %2%, discarding",
@@ -162,16 +162,16 @@ bool receiver::parse_timestamp_channel(
 
     // Pre-compute some conversion factors
     q::slices_t one_slice(1);
-    q::heaps_t slice_heaps = time_sys.convert<units::heaps_t>(one_slice);
+    q::heaps_t slice_heaps = time_sys.convert<units::heaps::time>(one_slice);
     q::spectra slice_spectra = time_sys.convert<units::spectra>(slice_heaps);
     q::bytes slice_bytes = time_sys.convert<units::bytes>(slice_heaps);
 
     // Compute slice-local coordinates
-    q::heaps_t time_heaps = time_sys.convert_down<units::heaps_t>(spectrum % slice_spectra);
+    q::heaps_t time_heaps = time_sys.convert_down<units::heaps::time>(spectrum % slice_spectra);
     q::bytes time_bytes = time_sys.convert<units::bytes>(time_heaps);
-    q::heaps_f freq_heaps = freq_sys.convert_down<units::heaps_f>(channel);
+    q::heaps_f freq_heaps = freq_sys.convert_down<units::heaps::freq>(channel);
     heap_offset = time_bytes + channel.get() * slice_bytes;
-    present_idx = (time_heaps + freq_heaps.get() * slice_heaps).get();
+    present_idx = time_heaps * q::heaps_f(1) + freq_heaps * slice_heaps;
 
     if (!have_first)
         first_timestamp = timestamp;
@@ -182,7 +182,7 @@ slice *receiver::get_slice(q::ticks timestamp, q::spectra spectrum)
 {
     try
     {
-        q::slices_t slice_id = time_sys.convert_down<units::slices_t>(spectrum);
+        q::slices_t slice_id = time_sys.convert_down<units::slices::time>(spectrum);
         slice *s = get(slice_id.get());
         if (!s)
         {
@@ -232,7 +232,7 @@ std::uint8_t *receiver::allocate(std::size_t size, const spead2::recv::packet_he
         // It's a data heap, so we should be able to use it
         q::spectra spectrum;
         q::bytes heap_offset;
-        std::size_t present_idx;
+        q::heaps present_idx;
         if (parse_timestamp_channel(timestamp, channel,
                                     spectrum, heap_offset, present_idx))
         {
@@ -250,22 +250,22 @@ void receiver::flush(slice &s)
     {
         counters.heaps += s.n_present;
         counters.bytes += s.n_present * payload_size.get();
-        q::slices_t slice_id = time_sys.convert_down<units::slices_t>(q::spectra(s.spectrum));
+        q::slices_t slice_id = time_sys.convert_down<units::slices::time>(q::spectra(s.spectrum));
         std::int64_t total_heaps = (slice_id.get() + 1) * s.present.size();
         counters.total_heaps = std::max(counters.total_heaps, total_heaps);
 
         // If any heaps got lost, fill them with zeros
         if (s.n_present != s.present.size())
         {
-            const q::heaps_f slice_heaps_f = freq_sys.convert_one<units::slices_f, units::heaps_f>();
-            const q::heaps_t slice_heaps_t = time_sys.convert_one<units::slices_t, units::heaps_t>();
-            const q::bytes heap_bytes = time_sys.convert_one<units::heaps_t, units::bytes>();
-            const q::channels heap_channels = freq_sys.convert_one<units::heaps_f, units::channels>();
-            const q::bytes stride = time_sys.convert_one<units::slices_t, units::bytes>();
-            std::size_t present_idx = 0;
+            const q::heaps_f slice_heaps_f = freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
+            const q::heaps_t slice_heaps_t = time_sys.convert_one<units::slices::time, units::heaps::time>();
+            const q::bytes heap_bytes = time_sys.convert_one<units::heaps::time, units::bytes>();
+            const q::channels heap_channels = freq_sys.convert_one<units::heaps::freq, units::channels>();
+            const q::bytes stride = time_sys.convert_one<units::slices::time, units::bytes>();
+            q::heaps present_idx{0};
             for (q::heaps_f i{0}; i < slice_heaps_f; i++)
                 for (q::heaps_t j{0}; j < slice_heaps_t; j++, present_idx++)
-                    if (!s.present[present_idx])
+                    if (!s.present[present_idx.get()])
                     {
                         auto start_channel = freq_sys.convert<units::channels>(i);
                         const q::bytes dst_offset =
@@ -287,8 +287,8 @@ void receiver::packet_memcpy(const spead2::memory_allocator::pointer &allocation
         return;
 
     typedef unit_system<std::int64_t, units::bytes, units::channels> stride_system;
-    stride_system src_sys(time_sys.scale_factor<units::heaps_t, units::bytes>());
-    stride_system dst_sys(time_sys.scale_factor<units::slices_t, units::bytes>());
+    stride_system src_sys(time_sys.scale_factor<units::heaps::time, units::bytes>());
+    stride_system dst_sys(time_sys.scale_factor<units::slices::time, units::bytes>());
     q::bytes src_stride = src_sys.convert_one<units::channels, units::bytes>();
     /* Copy one channel at a time. Some extra index manipulation is needed
      * because the packet might have partial channels at the start and end,
@@ -345,7 +345,7 @@ void receiver::heap_ready(const spead2::recv::heap &h)
 
     q::spectra spectrum;
     q::bytes heap_offset;
-    std::size_t present_idx;
+    q::heaps present_idx;
     if (!parse_timestamp_channel(timestamp, channel, spectrum, heap_offset, present_idx))
     {
         counters.bad_metadata_heaps++;
@@ -374,10 +374,10 @@ void receiver::heap_ready(const spead2::recv::heap &h)
         log_message(spead2::log_level::warning, "heap was not reconstructed in-place");
         throw std::runtime_error("heap was not reconstructed in-place");
     }
-    if (!s->present[present_idx])
+    if (!s->present[present_idx.get()])
     {
         s->n_present++;
-        s->present[present_idx] = true;
+        s->present[present_idx.get()] = true;
     }
 }
 

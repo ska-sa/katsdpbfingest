@@ -9,7 +9,6 @@
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_memory_allocator.h>
 #include "common.h"
-#include "units.h"
 
 class receiver;
 
@@ -68,36 +67,6 @@ struct receiver_counters
     std::int64_t bad_metadata_heaps = 0;
 };
 
-namespace units
-{
-    // _t suffix means time axis, _f suffix means frequency axis
-    struct heaps_t { static const char *name() { return "heaps"; } };
-    struct heaps_f { static const char *name() { return "heaps"; } };
-    struct slices_t { static const char *name() { return "slices"; } };
-    struct slices_f { static const char *name() { return "slices"; } };
-    struct spectra { static const char *name() { return "spectra"; } };
-    struct channels { static const char *name() { return "channels"; } };
-    struct bytes { static const char *name() { return "bytes"; } };
-    struct ticks { static const char *name() { return "ticks"; } };
-
-    typedef unit_system<std::int64_t, bytes, spectra, heaps_t, slices_t> time_system;
-    typedef unit_system<std::int64_t, channels, heaps_f, slices_f> freq_system;
-    typedef unit_system<std::int64_t, ticks, spectra, heaps_t> timestamp_system;
-}
-
-// Some shortcuts for quantities of each unit
-namespace q
-{
-    typedef quantity<std::int64_t, units::heaps_t> heaps_t;
-    typedef quantity<std::int64_t, units::heaps_f> heaps_f;
-    typedef quantity<std::int64_t, units::slices_t> slices_t;
-    typedef quantity<std::int64_t, units::slices_f> slices_f;
-    typedef quantity<std::int64_t, units::spectra> spectra;
-    typedef quantity<std::int64_t, units::channels> channels;
-    typedef quantity<std::int64_t, units::bytes> bytes;
-    typedef quantity<std::int64_t, units::ticks> ticks;
-}
-
 /**
  * Collects data from the network, using custom stream classes. It has a
  * built-in thread pool with one thread, and runs almost entirely on that
@@ -127,9 +96,9 @@ private:
 
     // Metadata copied from or computed from the session_config
     const q::channels channel_offset;
-    const units::time_system time_sys;
-    const units::freq_system freq_sys;
-    const units::timestamp_system timestamp_sys;
+    const unit_system<std::int64_t, units::bytes, units::spectra, units::heaps::time, units::slices::time> time_sys;
+    const unit_system<std::int64_t, units::channels, units::heaps::freq, units::slices::freq> freq_sys;
+    const unit_system<std::int64_t, units::ticks, units::spectra, units::heaps::time> timestamp_sys;
     const q::bytes payload_size;
 
     // Hard-coded item IDs
@@ -176,7 +145,7 @@ private:
     bool parse_timestamp_channel(
         q::ticks timestamp, q::channels channel,
         q::spectra &spectrum,
-        q::bytes &heap_offset, std::size_t &present_idx);
+        q::bytes &heap_offset, q::heaps &present_idx);
 
     /**
      * Obtain a pointer to an allocated slice. It returns @c nullptr if the

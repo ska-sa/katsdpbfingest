@@ -92,6 +92,7 @@ void session::run_impl()
     {
         w.reset(new hdf5_writer(*config.filename, config.direct,
                                 channels, channels_per_heap, spectra_per_heap,
+                                config.heaps_per_slice_time,
                                 ticks_between_spectra));
         fd = w->get_fd();
         if (fstatfs(fd, &stat) < 0)

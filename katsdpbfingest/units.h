@@ -7,6 +7,9 @@
  * A unit system is a set of units, where each is an integer multiple of the
  * previous one. Units are specified with type tags. The ratios are stored in
  * an instance of the unit system.
+ *
+ * If unit_product<> is specialized for a pair of units, quantities of those
+ * units can be multiplied.
  */
 
 #include <type_traits>
@@ -77,14 +80,16 @@ public:
 #undef MAKE_ASSIGN_OPERATOR
 
     template<typename T2>
-    quantity<decltype(std::declval<T>() * std::declval<T2>()), U>
+    typename std::enable_if<std::is_convertible<T2, T>::value,
+                            quantity<decltype(std::declval<T>() * std::declval<T2>()), U>>::type
     constexpr operator *(T2 &&other) const
     {
         return make_quantity<U>(get() * std::forward<T2>(other));
     }
 
     template<typename T2, typename = decltype(std::declval<T>() * std::declval<T2>())>
-    quantity &operator *=(T2 &&other)
+    typename std::enable_if<std::is_convertible<T2, T>::value, quantity &>::type
+    operator *=(T2 &&other)
     {
         amount *= std::forward<T2>(other);
         return *this;
@@ -137,10 +142,23 @@ constexpr quantity<T, U> make_quantity(const T &amount)
 }
 
 template<typename T1, typename T2, typename U>
-quantity<decltype(std::declval<T1>() * std::declval<T2>()), U>
+typename std::enable_if<std::is_convertible<T1, T2>::value,
+                        quantity<decltype(std::declval<T1>() * std::declval<T2>()), U>>::type
 constexpr operator *(T1&& a, const quantity<T2, U> &b)
 {
     return b * a;
+}
+
+// Specialize with a 'type' field to give the resulting unit
+template<typename D1, typename D2>
+struct unit_product {};
+
+template<typename T1, typename U1, typename T2, typename U2>
+quantity<decltype(std::declval<T1>() * std::declval<T2>()),
+         typename unit_product<U1, U2>::type>
+operator *(const quantity<T1, U1> &a, const quantity<T2, U2> &b)
+{
+    return make_quantity<typename unit_product<U1, U2>::type>(a.get() * b.get());
 }
 
 template<typename T, typename U>
