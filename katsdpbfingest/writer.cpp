@@ -12,33 +12,45 @@
 #endif
 
 static void write_direct(
-    H5::DataSet &dataset, const hsize_t *offset, q::bytes data_size, const void *buf)
+    H5::DataSet &dataset, const hsize_t *offset, std::size_t data_size, const void *buf)
 {
 #if H5_VERSION_GE(1, 10, 3)
     // 1.10.3 moved this functionality from H5DO into the core
-    herr_t ret = H5Dwrite_chunk(dataset.getId(), H5P_DEFAULT, 0, offset, data_size.get(), buf);
+    herr_t ret = H5Dwrite_chunk(dataset.getId(), H5P_DEFAULT, 0, offset, data_size, buf);
 #else
-    herr_t ret = H5DOwrite_chunk(dataset.getId(), H5P_DEFAULT, 0, offset, data_size.get(), buf);
+    herr_t ret = H5DOwrite_chunk(dataset.getId(), H5P_DEFAULT, 0, offset, data_size, buf);
 #endif
     if (ret < 0)
         throw H5::DataSetIException("DataSet::write_chunk", "H5Dwrite_chunk failed");
 }
 
 hdf5_bf_raw_writer::hdf5_bf_raw_writer(
-    H5::Group &parent, int channels, int spectra_per_slice, const char *name)
-    : freq_sys(channels),
-    time_sys(2 * sizeof(std::int8_t), spectra_per_slice),
-    chunk_bytes(time_sys.convert_one<units::slices::time, units::bytes>() * channels)
+    H5::Group &parent,
+    const units::freq_system &freq_sys,
+    const units::time_system &time_sys,
+    const char *name)
+    : freq_sys(freq_sys), time_sys(time_sys),
+    chunk_bytes(bytes(time_sys.convert_one<units::slices::time, units::spectra>()
+                      * freq_sys.convert_one<units::slices::freq, units::channels>()))
 {
-    hsize_t dims[3] = {hsize_t(channels), 0, 2};
-    hsize_t maxdims[3] = {hsize_t(channels), H5S_UNLIMITED, 2};
-    hsize_t chunk[3] = {hsize_t(channels), hsize_t(spectra_per_slice), 2};
+    hsize_t chunk[3] = {
+        hsize_t(freq_sys.scale_factor<units::slices::freq, units::channels>()),
+        hsize_t(time_sys.scale_factor<units::slices::time, units::spectra>()),
+        2
+    };
+    hsize_t dims[3] = {chunk[0], 0, chunk[2]};
+    hsize_t maxdims[3] = {chunk[0], H5S_UNLIMITED, chunk[2]};
     H5::DataSpace file_space(3, dims, maxdims);
     H5::DSetCreatPropList dcpl;
     dcpl.setChunk(3, chunk);
     std::int8_t fill = 0;
     dcpl.setFillValue(H5::PredType::NATIVE_INT8, &fill);
     dataset = parent.createDataSet(name, H5::PredType::STD_I8BE, file_space, dcpl);
+}
+
+std::size_t hdf5_bf_raw_writer::bytes(q::samples n)
+{
+    return 2 * sizeof(std::int8_t) * n.get();
 }
 
 void hdf5_bf_raw_writer::add(const slice &s)
@@ -62,10 +74,9 @@ static void set_string_attribute(H5::H5Object &location, const std::string &name
 }
 
 hdf5_timestamps_writer::hdf5_timestamps_writer(
-    H5::Group &parent,
-    std::int64_t ticks_between_spectra, int spectra_per_heap,
+    H5::Group &parent, const units::time_system &time_sys,
     const char *name)
-    : timestamp_sys(ticks_between_spectra, spectra_per_heap)
+    : time_sys(time_sys)
 {
     hsize_t dims[1] = {0};
     hsize_t maxdims[1] = {H5S_UNLIMITED};
@@ -99,16 +110,16 @@ void hdf5_timestamps_writer::flush()
         // only arises when closing the file so should be cheap.
         std::memset(buffer.get() + n_buffer, 0, (chunk - n_buffer) * sizeof(std::uint64_t));
     }
-    write_direct(dataset, offset, chunk * q::bytes(sizeof(std::uint64_t)), buffer.get());
+    write_direct(dataset, offset, chunk * sizeof(std::uint64_t), buffer.get());
     n_written += n_buffer;
     n_buffer = 0;
 }
 
 void hdf5_timestamps_writer::add(q::ticks timestamp)
 {
-    q::spectra heap_spectra = timestamp_sys.convert_one<units::heaps::time, units::spectra>();
+    q::spectra heap_spectra = time_sys.convert_one<units::heaps::time, units::spectra>();
     for (q::spectra i{0}; i < heap_spectra; ++i)
-        buffer[n_buffer++] = (timestamp + timestamp_sys.convert<units::ticks>(i)).get();
+        buffer[n_buffer++] = (timestamp + time_sys.convert<units::ticks>(i)).get();
     assert(n_buffer <= chunk);
     if (n_buffer == chunk)
         flush();
@@ -120,41 +131,54 @@ flags_chunk::flags_chunk(q::heaps size)
     std::memset(data.get(), data_lost, size.get() * sizeof(std::uint8_t));
 }
 
-q::slices hdf5_flags_writer::compute_chunk_size_slices(q::heaps heaps_per_slice)
+q::heaps hdf5_flags_writer::heaps_per_slice(const units::freq_system &freq_sys,
+                                            const units::time_system &time_sys)
 {
+    return time_sys.convert_one<units::slices::time, units::heaps::time>()
+        * freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
+}
+
+q::slices hdf5_flags_writer::compute_chunk_size_slices(const units::freq_system &freq_sys,
+                                                       const units::time_system &time_sys)
+{
+    std::size_t n = bytes(heaps_per_slice(freq_sys, time_sys));
     // Make each chunk about 4MiB, rounding up if needed
-    std::size_t slices = (4 * 1024 * 1024 + heaps_per_slice.get() - 1) / heaps_per_slice.get();
+    std::size_t slices = (4 * 1024 * 1024 + n - 1) / n;
     return q::slices(slices);
 }
 
-q::heaps hdf5_flags_writer::compute_chunk_size_heaps(q::heaps heaps_per_slice)
+q::heaps hdf5_flags_writer::compute_chunk_size_heaps(const units::freq_system &freq_sys,
+                                                     const units::time_system &time_sys)
 {
-    return compute_chunk_size_slices(heaps_per_slice).get() * heaps_per_slice;
+    return compute_chunk_size_slices(freq_sys, time_sys).get()
+        * heaps_per_slice(freq_sys, time_sys);
+}
+
+std::size_t hdf5_flags_writer::bytes(q::heaps n)
+{
+    return sizeof(std::uint8_t) * n.get();
 }
 
 hdf5_flags_writer::hdf5_flags_writer(
-    H5::Group &parent, int heaps_per_slice_freq,
-    int spectra_per_heap, int heaps_per_slice_time,
+    H5::Group &parent,
+    const units::freq_system &freq_sys, const units::time_system &time_sys, 
     const char *name)
     : window<flags_chunk, hdf5_flags_writer>(
-        1, compute_chunk_size_heaps(q::heaps(heaps_per_slice_freq * heaps_per_slice_time))),
-    time_sys(sizeof(std::int8_t), heaps_per_slice_time,
-             compute_chunk_size_slices(q::heaps(heaps_per_slice_freq * heaps_per_slice_time)).get()),
-    freq_sys(heaps_per_slice_freq, 1),
-    timestamp_sys(spectra_per_heap, heaps_per_slice_time,
-                  time_sys.scale_factor<units::chunks::time, units::slices::time>()),
-    chunk_bytes(
-        freq_sys.scale_factor<units::chunks::freq, units::heaps::freq>()
-        * time_sys.scale_factor<units::chunks::time, units::bytes>())
+        1, compute_chunk_size_heaps(freq_sys, time_sys)),
+    freq_sys(freq_sys.append<units::chunks::freq>(1)),
+    time_sys(time_sys.append<units::chunks::time>(compute_chunk_size_slices(freq_sys, time_sys).get())),
+    chunk_bytes(bytes(
+        this->freq_sys.convert_one<units::chunks::freq, units::heaps::freq>()
+        * this->time_sys.convert_one<units::chunks::time, units::heaps::time>()))
 {
     hsize_t dims[2] = {
-        hsize_t(freq_sys.scale_factor<units::chunks::freq, units::heaps::freq>()),
+        hsize_t(this->freq_sys.scale_factor<units::chunks::freq, units::heaps::freq>()),
         0
     };
     hsize_t maxdims[2] = {dims[0], H5S_UNLIMITED};
     hsize_t chunk[2] = {
-        hsize_t(freq_sys.scale_factor<units::chunks::freq, units::heaps::freq>()),
-        hsize_t(time_sys.scale_factor<units::chunks::time, units::heaps::time>())
+        hsize_t(this->freq_sys.scale_factor<units::chunks::freq, units::heaps::freq>()),
+        hsize_t(this->time_sys.scale_factor<units::chunks::time, units::heaps::time>())
     };
     H5::DataSpace file_space(2, dims, maxdims);
     H5::DSetCreatPropList dcpl;
@@ -180,17 +204,17 @@ void hdf5_flags_writer::flush(flags_chunk &chunk)
         dataset.extend(new_size);
         const hsize_t offset[2] = {
             0,
-            hsize_t(timestamp_sys.convert_down<units::heaps::time>(chunk.spectrum).get())
+            hsize_t(time_sys.convert_down<units::heaps::time>(chunk.spectrum).get())
         };
         write_direct(dataset, offset, chunk_bytes, chunk.data.get());
     }
     chunk.spectrum = q::spectra(-1);
-    std::memset(chunk.data.get(), data_lost, chunk_bytes.get());
+    std::memset(chunk.data.get(), data_lost, chunk_bytes);
 }
 
 void hdf5_flags_writer::add(const slice &s)
 {
-    q::slices_t slice_id = timestamp_sys.convert_down<units::slices::time>(s.spectrum);
+    q::slices_t slice_id = time_sys.convert_down<units::slices::time>(s.spectrum);
     q::chunks_t id = time_sys.convert_down<units::chunks::time>(slice_id);
     flags_chunk *chunk = get(id.get());
     assert(chunk != nullptr);  // we are given slices in-order, so cannot be behind the window
@@ -207,7 +231,7 @@ void hdf5_flags_writer::add(const slice &s)
             q::heaps pos = f * stride + (t + offset) * q::heaps_f(1);
             chunk->data[pos.get()] = s.present[present_idx] ? 0 : data_lost;
         }
-    chunk->spectrum = timestamp_sys.convert<units::spectra>(id);
+    chunk->spectrum = time_sys.convert<units::spectra>(id);
     n_slices = slice_id + q::slices_t(1);
 }
 
@@ -218,13 +242,12 @@ hdf5_writer::hdf5_writer(const std::string &filename, bool direct,
                          int heaps_per_slice_time)
     : file(filename, H5F_ACC_TRUNC, H5::FileCreatPropList::DEFAULT, make_fapl(direct)),
     group(file.createGroup("Data")),
-    bf_raw(group,
-           channels_per_heap * heaps_per_slice_freq,
-           spectra_per_heap * heaps_per_slice_time, "bf_raw"),
-    captured_timestamps(group, ticks_between_spectra, spectra_per_heap, "captured_timestamps"),
-    all_timestamps(group, ticks_between_spectra, spectra_per_heap, "timestamps"),
-    flags(group, heaps_per_slice_freq, spectra_per_heap, heaps_per_slice_time, "flags"),
-    timestamp_sys(ticks_between_spectra, spectra_per_heap, heaps_per_slice_time)
+    freq_sys(channels_per_heap, heaps_per_slice_freq),
+    time_sys(ticks_between_spectra, spectra_per_heap, heaps_per_slice_time),
+    bf_raw(group, freq_sys, time_sys, "bf_raw"),
+    captured_timestamps(group, time_sys, "captured_timestamps"),
+    all_timestamps(group, time_sys, "timestamps"),
+    flags(group, freq_sys, time_sys, "flags")
 {
     H5::DataSpace scalar;
     // 1.8.11 doesn't have the right C++ wrapper for this to work, so we
@@ -280,8 +303,8 @@ void hdf5_writer::add(const slice &s)
     q::ticks timestamp{s.timestamp};
     if (past_end_timestamp == q::ticks(-1))
         past_end_timestamp = timestamp;
-    q::ticks next_timestamp = timestamp + timestamp_sys.convert_one<units::slices::time, units::ticks>();
-    q::ticks step = timestamp_sys.convert_one<units::heaps::time, units::ticks>();
+    q::ticks next_timestamp = timestamp + time_sys.convert_one<units::slices::time, units::ticks>();
+    q::ticks step = time_sys.convert_one<units::heaps::time, units::ticks>();
     while (past_end_timestamp < next_timestamp)
     {
         all_timestamps.add(past_end_timestamp);

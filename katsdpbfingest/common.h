@@ -101,8 +101,12 @@ namespace units
     struct chunks : public twod<chunks> { static const char *name() { return "chunks"; } };
     struct spectra { static const char *name() { return "spectra"; } };
     struct channels { static const char *name() { return "channels"; } };
-    struct bytes { static const char *name() { return "bytes"; } };
     struct ticks { static const char *name() { return "ticks"; } };
+    struct samples { static const char *name() { return "samples"; } };
+    struct bytes { static const char *name() { return "bytes"; } };
+
+    typedef unit_system<std::int64_t, units::ticks, units::spectra, units::heaps::time, units::slices::time> time_system;
+    typedef unit_system<std::int64_t, units::channels, units::heaps::freq, units::slices::freq> freq_system;
 }
 
 // Some shortcuts for quantities of each unit
@@ -119,8 +123,9 @@ namespace q
     typedef quantity<std::int64_t, units::chunks> chunks;
     typedef quantity<std::int64_t, units::spectra> spectra;
     typedef quantity<std::int64_t, units::channels> channels;
-    typedef quantity<std::int64_t, units::bytes> bytes;
     typedef quantity<std::int64_t, units::ticks> ticks;
+    typedef quantity<std::int64_t, units::samples> samples;
+    typedef quantity<std::int64_t, units::bytes> bytes;
 }
 
 template<typename Base>
@@ -134,6 +139,9 @@ struct unit_product<units::freq_unit<Base>, units::time_unit<Base>>
 {
     typedef Base type;
 };
+
+template<> struct unit_product<units::spectra, units::channels> { typedef units::samples type; };
+template<> struct unit_product<units::channels, units::spectra> { typedef units::samples type; };
 
 /**
  * Return a vector that can be passed to a @c spead2::thread_pool constructor
@@ -193,7 +201,7 @@ private:
 public:
     // The args are passed to the constructor for T to construct the slots
     template<typename... Args>
-    explicit window(std::size_t window_size, Args&&... args);
+    explicit window(std::size_t window_size, const Args&... args);
 
     /// Returns pointer to the slot for @a id, or @c nullptr if the window has moved on
     T *get(std::int64_t id);
@@ -204,11 +212,11 @@ public:
 
 template<typename T, typename Derived>
 template<typename... Args>
-window<T, Derived>::window(std::size_t window_size, Args&&... args)
+window<T, Derived>::window(std::size_t window_size, const Args&... args)
 {
     slots.reserve(window_size);
     for (std::size_t i = 0; i < window_size; i++)
-        slots.emplace_back(std::forward<Args>(args)...);
+        slots.emplace_back(args...);
 }
 
 template<typename T, typename Derived>

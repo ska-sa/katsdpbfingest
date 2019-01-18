@@ -311,6 +311,17 @@ public:
         : ratio1(ratio1), tail(std::forward<Args>(ratios)...)
     {
     }
+
+    constexpr unit_system_base(T ratio1, unit_system_base<T, U2, Units...> tail)
+        : ratio1(ratio1), tail(tail)
+    {
+    }
+
+    template<typename U>
+    constexpr unit_system_base<T, U1, U2, Units..., U> append(T ratio) const
+    {
+        return unit_system_base<T, U1, U2, Units..., U>(ratio1, tail.template append<U>(ratio));
+    }
 };
 
 // Base case of recursion: only one unit, so no ratios
@@ -323,6 +334,12 @@ public:
     constexpr T scale_factor_impl(U *, U *) const
     {
         return T(1);
+    }
+
+    template<typename U2>
+    constexpr unit_system_base<T, U, U2> append(T ratio) const
+    {
+        return unit_system_base<T, U, U2>(ratio);
     }
 };
 
@@ -339,6 +356,11 @@ class unit_system : private detail::unit_system_base<T, Units...>
 {
 public:
     using detail::unit_system_base<T, Units...>::unit_system_base;
+
+    constexpr unit_system(const detail::unit_system_base<T, Units...> &base)
+        : detail::unit_system_base<T, Units...>(base)
+    {
+    }
 
     /// True type if @a U is one of the units
     template<typename U>
@@ -408,5 +430,15 @@ public:
     constexpr convert_one() const
     {
         return quantity<T, U2>(scale_factor<U1, U2>());
+    }
+
+    /**
+     * Create a new unit system with an additional unit at the end.
+     */
+    template<typename U>
+    constexpr unit_system<T, Units..., U> append(T ratio) const
+    {
+        return unit_system<T, Units..., U>(
+            detail::unit_system_base<T, Units...>::unit_system_base::template append<U>(ratio));
     }
 };

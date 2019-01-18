@@ -96,10 +96,9 @@ private:
 
     // Metadata copied from or computed from the session_config
     const q::channels channel_offset;
-    const unit_system<std::int64_t, units::bytes, units::spectra, units::heaps::time, units::slices::time> time_sys;
-    const unit_system<std::int64_t, units::channels, units::heaps::freq, units::slices::freq> freq_sys;
-    const unit_system<std::int64_t, units::ticks, units::spectra, units::heaps::time> timestamp_sys;
-    const q::bytes payload_size;
+    const units::freq_system freq_sys;
+    const units::time_system time_sys;
+    const std::size_t payload_size;
 
     // Hard-coded item IDs
     static constexpr int bf_raw_id = 0x5000;
@@ -120,6 +119,9 @@ private:
     receiver_counters counters_public;
     /// Timer used to periodically update @ref counters_public from @ref counters
     boost::asio::steady_timer counters_timer;
+
+    /// Number of bytes to a given number of samples
+    static std::size_t bytes(q::samples n);
 
     /// Create a single fully-allocated slice
     slice make_slice();
@@ -145,7 +147,7 @@ private:
     bool parse_timestamp_channel(
         q::ticks timestamp, q::channels channel,
         q::spectra &spectrum,
-        q::bytes &heap_offset, q::heaps &present_idx);
+        std::size_t &heap_offset, q::heaps &present_idx);
 
     /**
      * Obtain a pointer to an allocated slice. It returns @c nullptr if the
