@@ -8,6 +8,7 @@ import time
 import contextlib
 import socket
 import asyncio
+from unittest import mock
 
 import h5py
 import numpy as np
@@ -55,7 +56,7 @@ class TestSession:
         config.bandwidth = 856e6
         config.center_freq = 1284e6
         config.scale_factor_timestamp = 1712e6
-        config.heaps_per_slice_time = 1
+        config.heaps_per_slice_time = 2
         _bf_ingest.Session(config)
 
 
@@ -63,18 +64,14 @@ class TestCaptureServer(asynctest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmpdir)
-        # To avoid collisions when running tests in parallel on a single host,
-        # create a socket for the duration of the test and use its port as the
-        # port for the test. Sockets in the same network namespace should have
-        # unique ports.
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.addCleanup(self._sock.close)
-        self._sock.bind(('127.0.0.1', 0))
-        self.port = self._sock.getsockname()[1]
+        self.port = 7148
         self.n_channels = 1024
         self.spectra_per_heap = 256
+        # No data actually travels through these multicast groups;
+        # it gets mocks out to use the inproc transport instead.
         self.endpoints = endpoint.endpoint_list_parser(self.port)(
             '239.102.2.0+7:{}'.format(self.port))
+        self.inproc_queues = {endpoint: spead2.InprocQueue() for endpoint in self.endpoints}
         self.n_bengs = 16
         self.ticks_between_spectra = 8192
         self.adc_sample_rate = 1712000000.0
@@ -109,6 +106,15 @@ class TestCaptureServer(asynctest.TestCase):
             '--stats-interface=lo'],
             argparse.Namespace(telstate=telstate))
         self.loop = asyncio.get_event_loop()
+        self.patch_add_endpoint()
+
+    def patch_add_endpoint(self):
+        def add_endpoint(config, host, port):
+            config.add_inproc(self.inproc_queues[endpoint.Endpoint(host, port)])
+
+        patcher = mock.patch.object(_bf_ingest.SessionConfig, 'add_endpoint', add_endpoint)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     async def test_manual_stop_no_data(self) -> None:
         """Manual stop before any data is received"""
@@ -157,9 +163,8 @@ class TestCaptureServer(asynctest.TestCase):
         ig.add_item(name='bf_raw', id=0x5000,
                     description='Beamformer data',
                     shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
-        streams = [spead2.send.UdpStream(
-            spead2.ThreadPool(), ep.host, self.port, config, ttl=1, interface_address='127.0.0.1')
-            for ep in self.endpoints]
+        streams = [spead2.send.InprocStream(spead2.ThreadPool(), self.inproc_queues[ep], config)
+                   for ep in self.endpoints]
         for stream in streams:
             stream.send_heap(ig.get_heap(descriptors='all'))
             stream.send_heap(ig.get_start())
