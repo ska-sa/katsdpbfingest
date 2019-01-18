@@ -99,9 +99,8 @@ private:
 
 public:
     hdf5_writer(const std::string &filename, bool direct,
-                int channels_per_heap, int heaps_per_slice_freq,
-                std::int64_t ticks_between_spectra,
-                int spectra_per_heap, int heaps_per_slice_time);
+                const units::freq_system &freq_sys,
+                const units::time_system &time_sys);
     void add(const slice &s);
     int get_fd() const;
 };

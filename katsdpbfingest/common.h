@@ -302,6 +302,9 @@ struct session_config
     std::string get_stats_interface_address() const;
     void set_stats_interface_address(const std::string &address);
 
+    units::freq_system get_freq_system() const;
+    units::time_system get_time_system() const;
+
     // Check that all required items have been set and return self.
     // Throws invalid_value if not.
     const session_config &validate() const;

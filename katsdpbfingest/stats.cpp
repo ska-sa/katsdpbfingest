@@ -228,9 +228,8 @@ stats_collector::stats_collector(const session_config &config)
     data(config),
     sync_time(config.sync_time),
     scale_factor_timestamp(config.scale_factor_timestamp),
-    // TODO: make helpers to construct freq_sys/time_sys from config
-    freq_sys(config.channels_per_heap, config.channels / config.channels_per_heap),
-    time_sys(config.ticks_between_spectra, config.spectra_per_heap, config.heaps_per_slice_time),
+    freq_sys(config.get_freq_system()),
+    time_sys(config.get_time_system()),
     stream(io_service, config.stats_endpoint,
            spead2::send::stream_config(8872),
            spead2::send::udp_stream::default_buffer_size,

@@ -76,6 +76,18 @@ void session_config::set_stats_interface_address(const std::string &address)
     stats_interface_address = boost::asio::ip::address_v4::from_string(address);
 }
 
+units::freq_system session_config::get_freq_system() const
+{
+    return units::freq_system(channels_per_heap, channels / channels_per_heap);
+}
+
+units::time_system session_config::get_time_system() const
+{
+    return units::time_system(ticks_between_spectra,
+                              spectra_per_heap,
+                              heaps_per_slice_time);
+}
+
 const session_config &session_config::validate() const
 {
     if (channels <= 0)

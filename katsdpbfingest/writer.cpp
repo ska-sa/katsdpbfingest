@@ -231,14 +231,11 @@ void hdf5_flags_writer::add(const slice &s)
 }
 
 hdf5_writer::hdf5_writer(const std::string &filename, bool direct,
-                         int channels_per_heap, int heaps_per_slice_freq,
-                         std::int64_t ticks_between_spectra,
-                         int spectra_per_heap,
-                         int heaps_per_slice_time)
+                         const units::freq_system &freq_sys,
+                         const units::time_system &time_sys)
     : file(filename, H5F_ACC_TRUNC, H5::FileCreatPropList::DEFAULT, make_fapl(direct)),
     group(file.createGroup("Data")),
-    freq_sys(channels_per_heap, heaps_per_slice_freq),
-    time_sys(ticks_between_spectra, spectra_per_heap, heaps_per_slice_time),
+    freq_sys(freq_sys), time_sys(time_sys),
     bf_raw(group, freq_sys, time_sys, "bf_raw"),
     timestamps(group, time_sys, "timestamps"),
     flags(group, freq_sys, time_sys, "flags")

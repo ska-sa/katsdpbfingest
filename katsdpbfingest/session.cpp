@@ -94,10 +94,7 @@ void session::run_impl()
     if (config.filename)
     {
         w.reset(new hdf5_writer(*config.filename, config.direct,
-                                config.channels_per_heap,
-                                config.channels / config.channels_per_heap,
-                                config.ticks_between_spectra, config.spectra_per_heap,
-                                config.heaps_per_slice_time));
+                                config.get_freq_system(), config.get_time_system()));
         fd = w->get_fd();
         if (fstatfs(fd, &stat) < 0)
             throw std::system_error(errno, std::system_category(), "fstatfs failed");
