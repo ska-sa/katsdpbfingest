@@ -107,12 +107,30 @@ class TestCaptureServer(asynctest.TestCase):
             argparse.Namespace(telstate=telstate))
         self.loop = asyncio.get_event_loop()
         self.patch_add_endpoint()
+        self.patch_create_session_config()
 
     def patch_add_endpoint(self):
-        def add_endpoint(config, host, port):
+        def add_endpoint(config: _bf_ingest.SessionConfig, host: str, port: int) -> None:
             config.add_inproc(self.inproc_queues[endpoint.Endpoint(host, port)])
 
         patcher = mock.patch.object(_bf_ingest.SessionConfig, 'add_endpoint', add_endpoint)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def patch_create_session_config(self):
+        """Force heaps_per_slice_time to 2.
+
+        The test is written around this value, but the default is to compute
+        it from other parameters.
+        """
+        orig_create_session_config = bf_ingest_server.create_session_config
+        def create_session_config(args: argparse.Namespace) -> _bf_ingest.SessionConfig:
+            config = orig_create_session_config(args)
+            config.heaps_per_slice_time = 2
+            return config
+
+        patcher = mock.patch.object(
+            bf_ingest_server, 'create_session_config', create_session_config)
         patcher.start()
         self.addCleanup(patcher.stop)
 

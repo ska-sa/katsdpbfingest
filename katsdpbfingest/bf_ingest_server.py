@@ -57,7 +57,7 @@ def _config_from_telstate(telstate: katsdptelstate.TelescopeState,
     setattr(config, attr_name, value)
 
 
-def _create_session_config(args: argparse.Namespace) -> SessionConfig:
+def create_session_config(args: argparse.Namespace) -> SessionConfig:
     """Creates a SessionConfig object for a :class:`CaptureServer`.
 
     Note that this function makes blocking calls to telstate. The returned
@@ -69,7 +69,6 @@ def _create_session_config(args: argparse.Namespace) -> SessionConfig:
         Command-line arguments. See :class:`CaptureServer`.
     """
     config = SessionConfig('')  # Real filename supplied later
-    config.heaps_per_slice_time = 1
     config.max_packet = args.max_packet
     config.buffer_size = args.buffer_size
     if args.interface is not None:
@@ -88,6 +87,9 @@ def _create_session_config(args: argparse.Namespace) -> SessionConfig:
     for name in ['ticks_between_spectra', 'spectra_per_heap', 'sync_time',
                  'bandwidth', 'center_freq', 'scale_factor_timestamp']:
         _config_from_telstate(telstate, config, name)
+
+    # Set up batching to get 32MB per slice
+    config.heaps_per_slice_time = max(1, 2**25 // (config.channels * config.spectra_per_heap * 2))
 
     # Check that the requested channel range is valid.
     all_channels = Range(0, config.channels)
@@ -262,7 +264,7 @@ class CaptureServer:
         self._args = args
         self._loop = loop
         self._capture = None      # type: Optional[_CaptureSession]
-        self._config = _create_session_config(args)
+        self._config = create_session_config(args)
 
     @property
     def capturing(self):

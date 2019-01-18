@@ -92,7 +92,7 @@ private:
     bool use_ibv = false;
 
     /// Depth of window
-    static constexpr std::size_t window_size = 64;
+    static constexpr std::size_t window_size = 8;
 
     // Metadata copied from or computed from the session_config
     const q::channels channel_offset;
