@@ -72,10 +72,11 @@ void session::run_impl()
     spead2::ringbuffer<slice> &ring = recv.ring;
     spead2::ringbuffer<slice> &free_ring = recv.free_ring;
 
-    const int channels = config.channels;
-    const int channels_per_heap = config.channels_per_heap;
-    const int spectra_per_heap = config.spectra_per_heap;
-    const std::int64_t ticks_between_spectra = config.ticks_between_spectra;
+    const unit_system<std::int64_t, units::bytes, units::ticks, units::spectra, units::heaps::time, units::slices::time> time_sys(
+        2 * sizeof(std::int8_t), config.ticks_between_spectra, config.spectra_per_heap,
+        config.heaps_per_slice_time);
+    const unit_system<std::int64_t, units::channels, units::heaps::freq, units::slices::freq> freq_sys(
+        config.channels_per_heap, config.channels / config.channels_per_heap);
 
     std::unique_ptr<stats_collector> stats;
     if (!config.stats_endpoint.address().is_unspecified())
@@ -86,26 +87,28 @@ void session::run_impl()
     std::unique_ptr<hdf5_writer> w;
     int fd = -1;
     std::size_t reserve_blocks = 0;
-    std::int64_t n_total_heaps = 0;
+    q::heaps n_total_heaps{0};
     struct statfs stat;
+    // Number of heaps in time between disk space checks
+    constexpr q::heaps_t check_cadence{1000};
     if (config.filename)
     {
         w.reset(new hdf5_writer(*config.filename, config.direct,
-                                channels, channels_per_heap, spectra_per_heap,
+                                config.channels, config.channels_per_heap, config.spectra_per_heap,
                                 config.heaps_per_slice_time,
-                                ticks_between_spectra));
+                                config.ticks_between_spectra));
         fd = w->get_fd();
         if (fstatfs(fd, &stat) < 0)
             throw std::system_error(errno, std::system_category(), "fstatfs failed");
-        std::size_t slice_size = 2 * spectra_per_heap * channels;
-        reserve_blocks = (1024 * 1024 * 1024 + 1000 * slice_size) / stat.f_bsize;
+        const q::bytes check_bytes =
+            freq_sys.scale_factor<units::slices::freq, units::channels>()
+            * time_sys.convert<units::bytes>(check_cadence);
+        reserve_blocks = (1024 * 1024 * 1024 + check_bytes.get()) / stat.f_bsize;
     }
 
     bool done = false;
-    // Number of heaps in time between disk space checks
-    constexpr std::int64_t check_cadence = 1000;
     // When time_heaps passes this value, we check disk space and log a message
-    std::int64_t next_check = check_cadence;
+    q::heaps_t next_check = check_cadence;
     while (!done)
     {
         try
@@ -115,8 +118,8 @@ void session::run_impl()
                 stats->add(s);
             if (w)
                 w->add(s);
-            std::int64_t time_heaps = (s.spectrum + spectra_per_heap) / spectra_per_heap;
-            std::int64_t total_heaps = time_heaps * (channels / channels_per_heap);
+            q::heaps_t time_heaps = time_sys.convert_down<units::heaps::time>(s.spectrum) + q::heaps_t(1);
+            q::heaps total_heaps = time_heaps * freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
             if (total_heaps > n_total_heaps)
             {
                 n_total_heaps = total_heaps;

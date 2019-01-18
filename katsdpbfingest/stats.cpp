@@ -255,14 +255,15 @@ stats_collector::stats_collector(const session_config &config)
 
 void stats_collector::add(const slice &s)
 {
+    std::int64_t timestamp = s.timestamp.get();
     if (start_timestamp == -1)
-        start_timestamp = s.timestamp;
-    assert(s.timestamp >= start_timestamp); // timestamps must be provided in order
-    if (s.timestamp >= start_timestamp + interval)
+        start_timestamp = timestamp;
+    assert(timestamp >= start_timestamp); // timestamps must be provided in order
+    if (timestamp >= start_timestamp + interval)
     {
         transmit();
         // Get start timestamp that is of form first_timestamp + i * interval
-        start_timestamp += (s.timestamp - start_timestamp) / interval * interval;
+        start_timestamp += (timestamp - start_timestamp) / interval * interval;
     }
 
     // Update the statistics using the heaps in the slice

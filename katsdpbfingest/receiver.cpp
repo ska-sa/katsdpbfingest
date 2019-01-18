@@ -191,9 +191,9 @@ slice *receiver::get_slice(q::ticks timestamp, q::spectra spectrum)
         if (!s->data)
         {
             *s = free_ring.pop();
-            s->timestamp = timestamp.get();
-            s->spectrum = time_sys.convert<units::spectra>(slice_id).get();
-            s->n_present = 0;
+            s->timestamp = timestamp;
+            s->spectrum = time_sys.convert<units::spectra>(slice_id);
+            s->n_present = q::heaps(0);
             // clear all the bits by resizing down to zero then back to original size
             auto orig_size = s->present.size();
             s->present.clear();
@@ -248,14 +248,14 @@ void receiver::flush(slice &s)
 {
     if (s.data)
     {
-        counters.heaps += s.n_present;
-        counters.bytes += s.n_present * payload_size.get();
-        q::slices_t slice_id = time_sys.convert_down<units::slices::time>(q::spectra(s.spectrum));
+        counters.heaps += s.n_present.get();
+        counters.bytes += s.n_present.get() * payload_size.get();
+        q::slices_t slice_id = time_sys.convert_down<units::slices::time>(s.spectrum);
         std::int64_t total_heaps = (slice_id.get() + 1) * s.present.size();
         counters.total_heaps = std::max(counters.total_heaps, total_heaps);
 
         // If any heaps got lost, fill them with zeros
-        if (s.n_present != s.present.size())
+        if (s.n_present != q::heaps(s.present.size()))
         {
             const q::heaps_f slice_heaps_f = freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
             const q::heaps_t slice_heaps_t = time_sys.convert_one<units::slices::time, units::heaps::time>();
@@ -277,7 +277,7 @@ void receiver::flush(slice &s)
         }
         ring.push(std::move(s));
     }
-    s.spectrum = -1;
+    s.spectrum = q::spectra(-1);
 }
 
 void receiver::packet_memcpy(const spead2::memory_allocator::pointer &allocation,

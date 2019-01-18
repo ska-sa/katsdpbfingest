@@ -43,12 +43,11 @@ hdf5_bf_raw_writer::hdf5_bf_raw_writer(
 
 void hdf5_bf_raw_writer::add(const slice &s)
 {
-    q::spectra spectrum(s.spectrum);
-    q::spectra end = spectrum + time_sys.convert_one<units::slices::time, units::spectra>();
+    q::spectra end = s.spectrum + time_sys.convert_one<units::slices::time, units::spectra>();
     q::channels channels = freq_sys.convert_one<units::slices::freq, units::channels>();
     hsize_t new_size[3] = {hsize_t(channels.get()), hsize_t(end.get()), 2};
     dataset.extend(new_size);
-    const hsize_t offset[3] = {0, hsize_t(spectrum.get()), 0};
+    const hsize_t offset[3] = {0, hsize_t(s.spectrum.get()), 0};
     write_direct(dataset, offset, chunk_bytes, s.data.get());
 }
 
@@ -190,7 +189,7 @@ void hdf5_flags_writer::flush(flags_chunk &chunk)
 
 void hdf5_flags_writer::add(const slice &s)
 {
-    q::slices_t slice_id = timestamp_sys.convert_down<units::slices::time>(q::spectra(s.spectrum));
+    q::slices_t slice_id = timestamp_sys.convert_down<units::slices::time>(s.spectrum);
     q::chunks_t id = time_sys.convert_down<units::chunks::time>(slice_id);
     flags_chunk *chunk = get(id.get());
     assert(chunk != nullptr);  // we are given slices in-order, so cannot be behind the window
@@ -283,7 +282,7 @@ void hdf5_writer::add(const slice &s)
         past_end_timestamp += all_timestamps.timestamp_sys.convert_one<units::heaps::time, units::ticks>();
     }
     // TODO: this needs to look at the individual columns
-    if (s.n_present == s.present.size())
+    if (s.n_present == q::heaps(s.present.size()))
         captured_timestamps.add(timestamp);
     bf_raw.add(s);
     flags.add(s);
