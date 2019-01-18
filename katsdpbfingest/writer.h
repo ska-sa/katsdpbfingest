@@ -34,8 +34,9 @@ private:
 public:
     const unit_system<std::int64_t, units::ticks, units::spectra, units::heaps::time> timestamp_sys;
 
-    hdf5_timestamps_writer(H5::Group &parent, int spectra_per_heap,
-                           std::uint64_t ticks_between_spectra, const char *name);
+    hdf5_timestamps_writer(H5::Group &parent,
+                           std::int64_t ticks_between_spectra, int spectra_per_heap,
+                           const char *name);
     ~hdf5_timestamps_writer();
     // Add a heap's worth of timestamps
     void add(q::ticks timestamp);
@@ -85,14 +86,15 @@ private:
     hdf5_bf_raw_writer bf_raw;
     hdf5_timestamps_writer captured_timestamps, all_timestamps;
     hdf5_flags_writer flags;
+    unit_system<std::int64_t, units::ticks, units::spectra, units::heaps::time, units::slices::time> timestamp_sys;
 
     static H5::FileAccPropList make_fapl(bool direct);
 
 public:
     hdf5_writer(const std::string &filename, bool direct,
-                int channels, int channels_per_heap,
-                int spectra_per_heap, int heaps_per_slice_time,
-                std::int64_t ticks_between_spectra);
+                int channels_per_heap, int heaps_per_slice_freq,
+                std::int64_t ticks_between_spectra,
+                int spectra_per_heap, int heaps_per_slice_time);
     void add(const slice &s);
     int get_fd() const;
 };

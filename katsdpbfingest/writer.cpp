@@ -62,8 +62,9 @@ static void set_string_attribute(H5::H5Object &location, const std::string &name
 }
 
 hdf5_timestamps_writer::hdf5_timestamps_writer(
-    H5::Group &parent, int spectra_per_heap,
-    std::uint64_t ticks_between_spectra, const char *name)
+    H5::Group &parent,
+    std::int64_t ticks_between_spectra, int spectra_per_heap,
+    const char *name)
     : timestamp_sys(ticks_between_spectra, spectra_per_heap)
 {
     hsize_t dims[1] = {0};
@@ -211,16 +212,19 @@ void hdf5_flags_writer::add(const slice &s)
 }
 
 hdf5_writer::hdf5_writer(const std::string &filename, bool direct,
-                         int channels, int channels_per_heap,
+                         int channels_per_heap, int heaps_per_slice_freq,
+                         std::int64_t ticks_between_spectra,
                          int spectra_per_heap,
-                         int heaps_per_slice_time,
-                         std::int64_t ticks_between_spectra)
+                         int heaps_per_slice_time)
     : file(filename, H5F_ACC_TRUNC, H5::FileCreatPropList::DEFAULT, make_fapl(direct)),
     group(file.createGroup("Data")),
-    bf_raw(group, channels, spectra_per_heap * heaps_per_slice_time, "bf_raw"),
-    captured_timestamps(group, spectra_per_heap, ticks_between_spectra, "captured_timestamps"),
-    all_timestamps(group, spectra_per_heap, ticks_between_spectra, "timestamps"),
-    flags(group, channels / channels_per_heap, spectra_per_heap, heaps_per_slice_time, "flags")
+    bf_raw(group,
+           channels_per_heap * heaps_per_slice_freq,
+           spectra_per_heap * heaps_per_slice_time, "bf_raw"),
+    captured_timestamps(group, ticks_between_spectra, spectra_per_heap, "captured_timestamps"),
+    all_timestamps(group, ticks_between_spectra, spectra_per_heap, "timestamps"),
+    flags(group, heaps_per_slice_freq, spectra_per_heap, heaps_per_slice_time, "flags"),
+    timestamp_sys(ticks_between_spectra, spectra_per_heap, heaps_per_slice_time)
 {
     H5::DataSpace scalar;
     // 1.8.11 doesn't have the right C++ wrapper for this to work, so we
@@ -276,10 +280,12 @@ void hdf5_writer::add(const slice &s)
     q::ticks timestamp{s.timestamp};
     if (past_end_timestamp == q::ticks(-1))
         past_end_timestamp = timestamp;
-    while (past_end_timestamp <= timestamp)
+    q::ticks next_timestamp = timestamp + timestamp_sys.convert_one<units::slices::time, units::ticks>();
+    q::ticks step = timestamp_sys.convert_one<units::heaps::time, units::ticks>();
+    while (past_end_timestamp < next_timestamp)
     {
         all_timestamps.add(past_end_timestamp);
-        past_end_timestamp += all_timestamps.timestamp_sys.convert_one<units::heaps::time, units::ticks>();
+        past_end_timestamp += step;
     }
     // TODO: this needs to look at the individual columns
     if (s.n_present == q::heaps(s.present.size()))
