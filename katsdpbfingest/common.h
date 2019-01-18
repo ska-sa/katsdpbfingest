@@ -164,6 +164,9 @@ struct slice
     q::heaps n_present{0};             ///< Number of 1 bits in @a present
     aligned_ptr<std::uint8_t> data;    ///< Payload: channel-major, time-minor
     std::vector<bool> present;         ///< Bitmask of present heaps: channel-major, time-minor
+
+    /// Number of bytes for n samples of data
+    static std::size_t bytes(q::samples n);
 };
 
 /**

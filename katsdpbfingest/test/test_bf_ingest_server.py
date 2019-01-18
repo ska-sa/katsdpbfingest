@@ -75,7 +75,7 @@ class TestCaptureServer(asynctest.TestCase):
         self.n_bengs = 16
         self.ticks_between_spectra = 8192
         self.adc_sample_rate = 1712000000.0
-        self.heaps_per_stats = 5
+        self.heaps_per_stats = 6
         self.channels_per_heap = self.n_channels // self.n_bengs
         attrs = {
             'i0_tied_array_channelised_voltage_0x_n_chans': self.n_channels,
@@ -127,7 +127,7 @@ class TestCaptureServer(asynctest.TestCase):
         assert_false(server.capturing)
 
     async def _test_stream(self, end: bool, write: bool) -> None:
-        n_heaps = 25              # number of heaps in time
+        n_heaps = 30              # number of heaps in time
         n_spectra = self.spectra_per_heap * n_heaps
         # Pick some heaps to drop, including an entire slice and
         # an entire channel for one stats dump
@@ -135,7 +135,7 @@ class TestCaptureServer(asynctest.TestCase):
         drop[:, 4] = True
         drop[2, 9] = True
         drop[7, 24] = True
-        drop[10, 15:20] = True
+        drop[10, 12:18] = True
         if not write:
             self.args.file_base = None
 
@@ -151,8 +151,11 @@ class TestCaptureServer(asynctest.TestCase):
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
         filename = await server.start_capture('1122334455')
         time.sleep(0.1)
-        # Send it a SPEAD stream
-        config = spead2.send.StreamConfig(max_packet_size=4196, rate=1e9 / 8)
+        # Send it a SPEAD stream. Since spead2 doesn't yet have an option to
+        # replicate the header items across all packets, we use a large
+        # packet size. This eventually needs to be addressed to provide better
+        # test coverage.
+        config = spead2.send.StreamConfig(max_packet_size=10**9, rate=1e9 / 8)
         flavour = spead2.Flavour(4, 64, 48, 0)
         ig = spead2.send.ItemGroup(flavour=flavour)
         ig.add_item(name='timestamp', id=0x1600,
@@ -222,14 +225,6 @@ class TestCaptureServer(asynctest.TestCase):
                 expected = 1234567890 \
                     + self.ticks_between_spectra * np.arange(self.spectra_per_heap * n_heaps)
                 np.testing.assert_equal(expected, timestamps)
-
-                captured_timestamps = h5file['/Data/captured_timestamps']
-                slice_drops = np.sum(drop, axis=0)
-                captured_slices = np.nonzero(slice_drops == 0)[0]
-                captured_spectra = captured_slices[:, np.newaxis] * self.spectra_per_heap + \
-                    np.arange(self.spectra_per_heap)[np.newaxis, :]
-                expected = 1234567890 + self.ticks_between_spectra * captured_spectra.flatten()
-                np.testing.assert_equal(expected, captured_timestamps)
 
                 flags = h5file['/Data/flags']
                 expected = np.where(drop, 8, 0).astype(np.uint8)

@@ -13,8 +13,6 @@ private:
     std::size_t chunk_bytes;
     H5::DataSet dataset;
 
-    static std::size_t bytes(q::samples n);
-
 public:
     hdf5_bf_raw_writer(H5::Group &parent,
                        const units::freq_system &freq_sys,
@@ -94,7 +92,7 @@ private:
     const units::freq_system freq_sys;
     const units::time_system time_sys;
     hdf5_bf_raw_writer bf_raw;
-    hdf5_timestamps_writer captured_timestamps, all_timestamps;
+    hdf5_timestamps_writer timestamps;
     hdf5_flags_writer flags;
 
     static H5::FileAccPropList make_fapl(bool direct);

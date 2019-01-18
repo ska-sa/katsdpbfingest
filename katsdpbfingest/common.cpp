@@ -30,6 +30,11 @@ std::vector<int> affinity_vector(int affinity)
         return {affinity};
 }
 
+std::size_t slice::bytes(q::samples n)
+{
+    return 2 * sizeof(std::int8_t) * n.get();
+}
+
 session_config::session_config(const std::string &filename)
     : filename(filename)
 {
@@ -79,8 +84,8 @@ const session_config &session_config::validate() const
         throw std::invalid_argument("channels_per_heap <= 0");
     if (spectra_per_heap <= 0)
         throw std::invalid_argument("spectra_per_heap <= 0");
-    if (spectra_per_heap > 32768)
-        throw std::invalid_argument("spectra_per_heap > 32768");
+    if (spectra_per_heap >= 32768)
+        throw std::invalid_argument("spectra_per_heap >= 32768");
     if (ticks_between_spectra <= 0)
         throw std::invalid_argument("ticks_between_spectra <= 0");
     if (sync_time <= 0)

@@ -30,8 +30,8 @@ hdf5_bf_raw_writer::hdf5_bf_raw_writer(
     const units::time_system &time_sys,
     const char *name)
     : freq_sys(freq_sys), time_sys(time_sys),
-    chunk_bytes(bytes(time_sys.convert_one<units::slices::time, units::spectra>()
-                      * freq_sys.convert_one<units::slices::freq, units::channels>()))
+    chunk_bytes(slice::bytes(time_sys.convert_one<units::slices::time, units::spectra>()
+                             * freq_sys.convert_one<units::slices::freq, units::channels>()))
 {
     hsize_t chunk[3] = {
         hsize_t(freq_sys.scale_factor<units::slices::freq, units::channels>()),
@@ -46,11 +46,6 @@ hdf5_bf_raw_writer::hdf5_bf_raw_writer(
     std::int8_t fill = 0;
     dcpl.setFillValue(H5::PredType::NATIVE_INT8, &fill);
     dataset = parent.createDataSet(name, H5::PredType::STD_I8BE, file_space, dcpl);
-}
-
-std::size_t hdf5_bf_raw_writer::bytes(q::samples n)
-{
-    return 2 * sizeof(std::int8_t) * n.get();
 }
 
 void hdf5_bf_raw_writer::add(const slice &s)
@@ -245,8 +240,7 @@ hdf5_writer::hdf5_writer(const std::string &filename, bool direct,
     freq_sys(channels_per_heap, heaps_per_slice_freq),
     time_sys(ticks_between_spectra, spectra_per_heap, heaps_per_slice_time),
     bf_raw(group, freq_sys, time_sys, "bf_raw"),
-    captured_timestamps(group, time_sys, "captured_timestamps"),
-    all_timestamps(group, time_sys, "timestamps"),
+    timestamps(group, time_sys, "timestamps"),
     flags(group, freq_sys, time_sys, "flags")
 {
     H5::DataSpace scalar;
@@ -265,7 +259,7 @@ hdf5_writer::hdf5_writer(const std::string &filename, bool direct,
      */
     if (version_attr.getCounter() > 1)
         version_attr.decRefCount();
-    const std::int32_t version = 3;
+    const std::int32_t version = 4;
     version_attr.write(H5::PredType::NATIVE_INT32, &version);
 }
 
@@ -307,12 +301,9 @@ void hdf5_writer::add(const slice &s)
     q::ticks step = time_sys.convert_one<units::heaps::time, units::ticks>();
     while (past_end_timestamp < next_timestamp)
     {
-        all_timestamps.add(past_end_timestamp);
+        timestamps.add(past_end_timestamp);
         past_end_timestamp += step;
     }
-    // TODO: this needs to look at the individual columns
-    if (s.n_present == q::heaps(s.present.size()))
-        captured_timestamps.add(timestamp);
     bf_raw.add(s);
     flags.add(s);
 }

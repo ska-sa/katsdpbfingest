@@ -56,13 +56,14 @@ private:
     /// Persist allocation of data to send (only used transiently)
     transmit_data data;
 
-    // Constants copied from the session_config
-    int spectra_per_heap;
+    // Constants copied/derived from the session_config
     double sync_time;
-    double scale_factor_timestamp;
+    quantity<double, units::ticks> scale_factor_timestamp;
+    units::freq_system freq_sys;
+    units::time_system time_sys;
 
-    std::int64_t interval;   ///< transmit interval, in timestamp units
-    std::int64_t start_timestamp = -1; ///< first timestamp of current accumulation
+    q::ticks interval;                ///< transmit interval
+    q::ticks start_timestamp{-1};     ///< first timestamp of current accumulation
 
     boost::asio::io_service io_service;
     spead2::send::udp_stream stream;

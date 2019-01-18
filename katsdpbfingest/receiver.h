@@ -120,9 +120,6 @@ private:
     /// Timer used to periodically update @ref counters_public from @ref counters
     boost::asio::steady_timer counters_timer;
 
-    /// Number of bytes to a given number of samples
-    static std::size_t bytes(q::samples n);
-
     /// Create a single fully-allocated slice
     slice make_slice();
 

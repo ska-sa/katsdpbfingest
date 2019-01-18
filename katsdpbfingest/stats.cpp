@@ -226,9 +226,11 @@ stats_collector::stats_collector(const session_config &config)
     saturated(config.channels),
     weight(config.channels),
     data(config),
-    spectra_per_heap(config.spectra_per_heap),
     sync_time(config.sync_time),
     scale_factor_timestamp(config.scale_factor_timestamp),
+    // TODO: make helpers to construct freq_sys/time_sys from config
+    freq_sys(config.channels_per_heap, config.channels / config.channels_per_heap),
+    time_sys(config.ticks_between_spectra, config.spectra_per_heap, config.heaps_per_slice_time),
     stream(io_service, config.stats_endpoint,
            spead2::send::stream_config(8872),
            spead2::send::udp_stream::default_buffer_size,
@@ -240,23 +242,23 @@ stats_collector::stats_collector(const session_config &config)
      * is a future need for larger values it can be handled by splitting
      * the accumulations into shorter pieces.
      */
-    assert(spectra_per_heap < 32768);
+    assert((time_sys.scale_factor<units::heaps::time, units::spectra>()) < 32768);
     spead2::send::heap start_heap;
     start_heap.add_start();
     send_heap(start_heap);
 
     // Convert config.stats_int_time to timestamp units and round to whole heaps
-    auto interval_align = std::int64_t(config.spectra_per_heap) * config.ticks_between_spectra;
-    interval = std::int64_t(std::round(config.stats_int_time * config.scale_factor_timestamp));
+    q::ticks interval_align = time_sys.convert_one<units::slices::time, units::ticks>();
+    interval = q::ticks(std::round(config.stats_int_time * config.scale_factor_timestamp));
     interval = interval / interval_align * interval_align;
-    if (interval <= 0)
+    if (interval <= q::ticks(0))
         interval = interval_align;
 }
 
 void stats_collector::add(const slice &s)
 {
-    std::int64_t timestamp = s.timestamp.get();
-    if (start_timestamp == -1)
+    q::ticks timestamp = s.timestamp;
+    if (start_timestamp == q::ticks(-1))
         start_timestamp = timestamp;
     assert(timestamp >= start_timestamp); // timestamps must be provided in order
     if (timestamp >= start_timestamp + interval)
@@ -267,23 +269,26 @@ void stats_collector::add(const slice &s)
     }
 
     // Update the statistics using the heaps in the slice
-    int channels = power_spectrum.size();
-    int heaps = s.present.size();
-    int channels_per_heap = channels / heaps;
     const int8_t *data = reinterpret_cast<const int8_t *>(s.data.get());
-    for (int heap = 0; heap < heaps; heap++)
-    {
-        if (!s.present[heap])
-            continue;
-        int start_channel = heap * channels_per_heap;
-        for (int channel = start_channel; channel < start_channel + channels_per_heap; channel++)
+    std::size_t present_idx = 0;
+    const q::spectra stride = time_sys.convert_one<units::slices::time, units::spectra>();
+    auto spectra_per_heap = time_sys.scale_factor<units::heaps::time, units::spectra>();
+    for (q::heaps_f hf{0}; hf < freq_sys.convert_one<units::slices::freq, units::heaps::freq>(); ++hf)
+        for (q::heaps_t ht{0}; ht < time_sys.convert_one<units::slices::time, units::heaps::time>(); ++ht, present_idx++)
         {
-            const int8_t *cdata = data + channel * spectra_per_heap * 2;
-            power_spectrum[channel] += power_sum(spectra_per_heap, cdata);
-            saturated[channel] += count_saturated(spectra_per_heap, cdata);
-            weight[channel] += spectra_per_heap;
+            if (!s.present[present_idx])
+                continue;
+            q::channels start_channel = freq_sys.convert<units::channels>(hf);
+            q::channels end_channel = start_channel + freq_sys.convert_one<units::heaps::freq, units::channels>();
+            q::samples offset = time_sys.convert<units::spectra>(ht) * q::channels(1);
+            for (q::channels channel = start_channel; channel < end_channel; ++channel)
+            {
+                const int8_t *cdata = data + 2 * (channel * stride + offset).get();
+                power_spectrum[channel.get()] += power_sum(spectra_per_heap, cdata);
+                saturated[channel.get()] += count_saturated(spectra_per_heap, cdata);
+                weight[channel.get()] += spectra_per_heap;
+            }
         }
-    }
 }
 
 void stats_collector::transmit()
@@ -323,7 +328,7 @@ stats_collector::~stats_collector()
 {
     // If start_timestamp != -1 then we received at least one heap, and from
     // then on we will always have an interval in progress.
-    if (start_timestamp != -1)
+    if (start_timestamp != q::ticks{-1})
         transmit();
     // Send stop heap
     spead2::send::heap heap;
