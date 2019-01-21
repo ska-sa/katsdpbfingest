@@ -90,6 +90,8 @@ def create_session_config(args: argparse.Namespace) -> SessionConfig:
 
     # Set up batching to get 32MB per slice
     config.heaps_per_slice_time = max(1, 2**25 // (config.channels * config.spectra_per_heap * 2))
+    # 1GB of buffer
+    config.ring_slots = 32
 
     # Check that the requested channel range is valid.
     all_channels = Range(0, config.channels)
