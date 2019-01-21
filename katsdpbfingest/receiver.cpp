@@ -506,6 +506,7 @@ receiver::receiver(const session_config &config)
             {
                 packet_memcpy(allocation, packet);
             });
+        stream.set_allow_unsized_heaps(false);
 
         emplace_readers();
         // Start periodic updates
