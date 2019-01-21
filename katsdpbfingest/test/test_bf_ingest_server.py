@@ -168,12 +168,9 @@ class TestCaptureServer(asynctest.TestCase):
         # Start up the server
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
         filename = await server.start_capture('1122334455')
-        time.sleep(0.1)
-        # Send it a SPEAD stream. Since spead2 doesn't yet have an option to
-        # replicate the header items across all packets, we use a large
-        # packet size. This eventually needs to be addressed to provide better
-        # test coverage.
-        config = spead2.send.StreamConfig(max_packet_size=10**9, rate=1e9 / 8)
+        # Send it a SPEAD stream. Use small packets to ensure that each heap is
+        # split into multiple packets, to check that the data scatter works.
+        config = spead2.send.StreamConfig(max_packet_size=256)
         flavour = spead2.Flavour(4, 64, 48, 0)
         ig = spead2.send.ItemGroup(flavour=flavour)
         ig.add_item(name='timestamp', id=0x1600,
@@ -186,7 +183,8 @@ class TestCaptureServer(asynctest.TestCase):
                     shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
         streams = [spead2.send.InprocStream(spead2.ThreadPool(), self.inproc_queues[ep], config)
                    for ep in self.endpoints]
-        for stream in streams:
+        for i, stream in enumerate(streams):
+            stream.set_cnt_sequence(i, len(streams))
             stream.send_heap(ig.get_heap(descriptors='all'))
             stream.send_heap(ig.get_start())
         ts = 1234567890
@@ -202,7 +200,11 @@ class TestCaptureServer(asynctest.TestCase):
                 ig['bf_raw'].value = data[j * self.channels_per_heap
                                           : (j + 1) * self.channels_per_heap, ...]
                 if not drop[j, i]:
-                    streams[j // (self.n_bengs // len(self.endpoints))].send_heap(ig.get_heap())
+                    heap = ig.get_heap()
+                    # The receiver looks at inline items in each packet to place
+                    # data correctly.
+                    heap.repeat_pointers = True
+                    streams[j // (self.n_bengs // len(self.endpoints))].send_heap(heap)
             ts += self.spectra_per_heap * self.ticks_between_spectra
         if end:
             for stream in streams:
