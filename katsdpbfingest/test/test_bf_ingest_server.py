@@ -123,12 +123,12 @@ class TestCaptureServer(asynctest.TestCase):
         The test is written around this value, but the default is to compute
         it from other parameters.
         """
-        orig_create_session_config = bf_ingest_server.create_session_config
         def create_session_config(args: argparse.Namespace) -> _bf_ingest.SessionConfig:
             config = orig_create_session_config(args)
             config.heaps_per_slice_time = 2
             return config
 
+        orig_create_session_config = bf_ingest_server.create_session_config
         patcher = mock.patch.object(
             bf_ingest_server, 'create_session_config', create_session_config)
         patcher.start()
