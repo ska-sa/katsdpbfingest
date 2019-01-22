@@ -13,7 +13,7 @@ except ImportError:
     hdf5 = collections.defaultdict(list)
 
 
-tests_require = ['nose', 'spead2>=1.11.0', 'asynctest']
+tests_require = ['nose', 'spead2>=1.11.1', 'asynctest']
 
 
 class get_include:

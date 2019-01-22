@@ -4,7 +4,6 @@ import argparse
 import tempfile
 import shutil
 import os.path
-import time
 import contextlib
 import socket
 import asyncio
@@ -268,8 +267,8 @@ class TestCaptureServer(asynctest.TestCase):
         ig = spead2.send.ItemGroup()
         spectrum = 0
         spectra_per_stats = self.heaps_per_stats * self.spectra_per_heap
-        for heap in heaps[1:-1]:
-            updated = ig.update(heap)
+        for rx_heap in heaps[1:-1]:
+            updated = ig.update(rx_heap)
             rx_data = updated['sd_data'].value
             rx_flags = updated['sd_flags'].value
             rx_timestamp = updated['sd_timestamp'].value
