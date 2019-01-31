@@ -277,7 +277,7 @@ struct session_config
     int channels = -1;
     // Time (in seconds) over which to accumulate stats
     double stats_int_time = 1.0;
-    // Number of heaps accumulated into an HDF5 chunks
+    // Number of heaps accumulated into an HDF5 chunk
     int heaps_per_slice_time = -1;
 
     // Metadata derived from telescope state.
