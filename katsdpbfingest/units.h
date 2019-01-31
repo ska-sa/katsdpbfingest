@@ -11,10 +11,42 @@
  * multiple of the previous one. Units are specified by type tags. The ratios
  * are stored in an instance of @ref unit_system.
  *
+ * An example of usage:
+ * @code
+ * struct cores {};
+ * struct servers {};
+ * struct racks {};
+ *
+ * typedef unit_system<int, cores, servers, racks> cpu_system;
+ *
+ * // 4-core servers, with 10 servers to a rack
+ * cpu_system my_dc(4, 10);
+ * // How many cores in 5 racks?
+ * quantity<int, cores> c = my_dc.convert<cores>(make_quantity<racks>(5));
+ * // How many racks are needed to provide 50 cores (rounding up)?
+ * quantity<int, racks> r = my_dc.convert_up<racks>(make_quantity<cores>(50));
+ * // How many servers per rack (as an int)?
+ * int ratio = my_dc.scale_factor<servers, racks>();
+ * // And as a quantity?
+ * quantity<int, servers> ratioq = my_dc.convert_one<servers, racks>();
+ * @endcode
+ *
  * Quantities with the same unit can be used with addition, subtraction,
  * modulo, assignment, and comparison operators. Quantities can also be
  * multiplied if a specialization of @ref unit_product is provided to
- * indicate the unit of the product.
+ * indicate the unit of the product. For example:
+ *
+ * @code
+ * struct newtons {};
+ * struct metres {};
+ * struct joules {};
+ * template<> struct unit_product<newtons, metres> { using type = joules; }
+ * template<> struct unit_product<metres, newtons> { using type = joules; }
+ *
+ * quantity<int, newtons> force(5);
+ * quantity<int, metres> dist(3);
+ * quantity<int, joules> work = force * dist;
+ * @endcode
  */
 
 #include <type_traits>
