@@ -211,7 +211,7 @@ class TestCaptureServer(asynctest.TestCase):
         streams = []
 
         # Wait for stream to shut down on its own
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.4)
         # Shut down the session
         await server.stop_capture()
 
