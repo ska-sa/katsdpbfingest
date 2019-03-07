@@ -76,6 +76,7 @@ class TestCaptureServer(asynctest.TestCase):
         self.adc_sample_rate = 1712000000.0
         self.heaps_per_stats = 6
         self.channels_per_heap = self.n_channels // self.n_bengs
+        self.channels_per_endpoint = self.n_channels // len(self.endpoints)
         attrs = {
             'i0_tied_array_channelised_voltage_0x_n_chans': self.n_channels,
             'i0_tied_array_channelised_voltage_0x_n_chans_per_substream': self.channels_per_heap,
@@ -182,10 +183,15 @@ class TestCaptureServer(asynctest.TestCase):
                     shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
         streams = [spead2.send.InprocStream(spead2.ThreadPool(), self.inproc_queues[ep], config)
                    for ep in self.endpoints]
+        subscribed_streams = self.args.channels // self.channels_per_endpoint
+        subscribed_bengs = self.args.channels // self.channels_per_heap
+        expected_heaps = 0
         for i, stream in enumerate(streams):
             stream.set_cnt_sequence(i, len(streams))
             stream.send_heap(ig.get_heap(descriptors='all'))
             stream.send_heap(ig.get_start())
+            if i in subscribed_streams:
+                expected_heaps += 2
         ts = 1234567890
         for i in range(n_heaps):
             data = np.zeros((self.n_channels, self.spectra_per_heap, 2), np.int8)
@@ -204,16 +210,28 @@ class TestCaptureServer(asynctest.TestCase):
                     # data correctly.
                     heap.repeat_pointers = True
                     streams[j // (self.n_bengs // len(self.endpoints))].send_heap(heap)
+                    if j in subscribed_bengs:
+                        expected_heaps += 1
             ts += self.spectra_per_heap * self.ticks_between_spectra
         if end:
             for stream in streams:
                 stream.send_heap(ig.get_end())
         streams = []
 
-        # Wait for stream to shut down on its own
-        await asyncio.sleep(0.4)
-        # Shut down the session
-        await server.stop_capture()
+        if not end:
+            # We only want to stop the capture once all the heaps we expect
+            # have been received, but time out after 5 seconds to avoid
+            # hanging the test.
+            for i in range(100):
+                if server.counters.raw_heaps >= expected_heaps:
+                    break
+                else:
+                    print('Only {} / {} heaps received so far'.format(
+                          server.counters.raw_heaps, expected_heaps))
+                    await asyncio.sleep(0.05)
+            else:
+                print('Giving up waiting for heaps')
+        await server.stop_capture(force=not end)
 
         expected_data = np.zeros((self.n_channels, n_spectra, 2), np.int8)
         expected_weight = np.ones((self.n_channels, n_spectra), np.int8)

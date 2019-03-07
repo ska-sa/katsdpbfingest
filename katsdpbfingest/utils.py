@@ -116,6 +116,17 @@ class Range:
             return Range(self.start // alignment * alignment,
                          (self.stop + alignment - 1) // alignment * alignment)
 
+    def __floordiv__(self, alignment: int) -> 'Range':
+        """Divide start and end by `alignment`.
+
+        If they are not multiples, it is as if :meth:`alignto` was used first.
+        """
+        if not self:
+            return self
+        else:
+            return Range(self.start // alignment,
+                         (self.stop + alignment - 1) // alignment)
+
     def intersection(self, other: 'Range') -> 'Range':
         start = max(self.start, other.start)
         stop = min(self.stop, other.stop)

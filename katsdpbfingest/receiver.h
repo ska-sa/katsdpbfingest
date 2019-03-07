@@ -53,10 +53,11 @@ public:
 
 struct receiver_counters
 {
-    std::int64_t heaps = 0;           ///< Heaps actually received
+    std::int64_t heaps = 0;           ///< Payload heaps actually received
     std::int64_t bytes = 0;           ///< Bytes of payload actually received
     std::int64_t packets = 0;         ///< Packets received by spead2
     std::int64_t batches = 0;         ///< Packet batches received by spead2
+    std::int64_t raw_heaps = 0;       ///< Heaps received by spead2
     std::size_t max_batch = 0;        ///< Largest batch size
     std::int64_t total_heaps = 0;     ///< Heaps we expected to receive (based on timestamps)
     /// Heaps rejected because the timestamp was too far in the past

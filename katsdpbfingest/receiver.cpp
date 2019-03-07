@@ -409,6 +409,7 @@ void receiver::refresh_counters()
     counters_public = counters;
     counters_public.packets = stream_stats.packets;
     counters_public.batches = stream_stats.batches;
+    counters_public.raw_heaps = stream_stats.heaps;
     counters_public.max_batch = stream_stats.max_batch;
     counters_public.incomplete_heaps = stream_stats.incomplete_heaps_evicted;
 }
