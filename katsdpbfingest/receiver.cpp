@@ -440,7 +440,7 @@ void receiver::stop_received()
 
 void receiver::graceful_stop()
 {
-    stream.get_strand().post([this] { stop_received(); });
+    stream.get_io_service().post([this] { stop_received(); });
 }
 
 void receiver::stop()
