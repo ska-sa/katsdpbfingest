@@ -214,12 +214,20 @@ class _CaptureSession:
             except Exception:
                 _logger.error("Capture threw exception", exc_info=True)
 
-    async def stop(self) -> None:
+    async def stop(self, force: bool = True) -> None:
         """Shut down the stream and wait for the session to end. This
         is a coroutine.
+
+        If `force` is False, it will wait until the stream stops on its
+        own in response to a stop heap.
         """
-        self._session.stop_stream()
+        if force:
+            self._session.stop_stream()
         await self._run_future
+
+    @property
+    def counters(self) -> ReceiverCounters:
+        return self._session.counters
 
 
 class CaptureServer:
@@ -288,11 +296,11 @@ class CaptureServer:
                 self.update_counters, self._loop)
         return self._capture.filename
 
-    async def stop_capture(self) -> None:
+    async def stop_capture(self, force: bool = True) -> None:
         """Stop capture, if currently running. This is a co-routine."""
         if self._capture is not None:
             capture = self._capture
-            await capture.stop()
+            await capture.stop(force)
             # Protect against a concurrent stop and start changing to a new
             # capture.
             if self._capture is capture:
@@ -300,6 +308,13 @@ class CaptureServer:
 
     def update_counters(self, counters: ReceiverCounters) -> None:
         pass   # Implemented by subclass
+
+    @property
+    def counters(self) -> ReceiverCounters:
+        if self._capture is not None:
+            return self._capture.counters
+        else:
+            return ReceiverCounters()
 
 
 class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
