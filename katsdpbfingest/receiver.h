@@ -64,8 +64,14 @@ struct receiver_counters
     std::int64_t too_old_heaps = 0;
     /// Heaps rejected due to missing packets
     std::int64_t incomplete_heaps = 0;
-    /// Heaps rejected because the timestamp or channel was invalid
-    std::int64_t bad_metadata_heaps = 0;
+    /// Heaps that don't have timestamp and data (e.g. descriptor heaps)
+    std::int64_t metadata_heaps = 0;
+    /// Heaps rejected because the timestamp was invalid
+    std::int64_t bad_timestamp_heaps = 0;
+    /// Heaps rejected because the channel was invalid
+    std::int64_t bad_channel_heaps = 0;
+    /// Heaps rejected because the data length was incorrect
+    std::int64_t bad_length_heaps = 0;
 };
 
 /**
@@ -130,7 +136,8 @@ private:
     /**
      * Process a timestamp and channel number from a heap into more useful
      * indices. Note: this function modifies state by setting @ref
-     * first_timestamp if this is the first (valid) call.
+     * first_timestamp if this is the first (valid) call. If it is invalid,
+     * a suitable error counter is incremented.
      *
      * @param timestamp        ADC timestamp
      * @param channel          Channel number of first channel in heap
@@ -138,6 +145,7 @@ private:
      *                         for first heap
      * @param[out] heap_offset Byte offset from start of slice data for this heap
      * @param[out] present_idx Position in @ref slice::present to record this heap
+     * @param quiet            If true, do not log or increment counters on bad heaps
      *
      * @retval true  if @a timestamp and @a channel are valid
      * @retval false otherwise, and a message is logged
@@ -145,7 +153,8 @@ private:
     bool parse_timestamp_channel(
         q::ticks timestamp, q::channels channel,
         q::spectra &spectrum,
-        std::size_t &heap_offset, q::heaps &present_idx);
+        std::size_t &heap_offset, q::heaps &present_idx,
+        bool quiet = false);
 
     /**
      * Obtain a pointer to an allocated slice. It returns @c nullptr if the

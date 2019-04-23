@@ -364,8 +364,22 @@ class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
                    "(prometheus: counter)",
                    initial_status=Sensor.Status.NOMINAL,
                    status_func=_warn_if_positive),
-            Sensor(int, "input-bad-metadata-heaps-total",
-                   "Number of heaps rejected due to bad timestamp or channel "
+            Sensor(int, "input-metadata-heaps-total",
+                   "Number of heaps that do not contain data "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL),
+            Sensor(int, "input-bad-timestamp-heaps-total",
+                   "Number of heaps rejected due to bad timestamp "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL,
+                   status_func=_warn_if_positive),
+            Sensor(int, "input-bad-channel-heaps-total",
+                   "Number of heaps rejected due to bad channel offset "
+                   "(prometheus: counter)",
+                   initial_status=Sensor.Status.NOMINAL,
+                   status_func=_warn_if_positive),
+            Sensor(int, "input-bad-length-heaps-total",
+                   "Number of heaps rejected due to bad payload length "
                    "(prometheus: counter)",
                    initial_status=Sensor.Status.NOMINAL,
                    status_func=_warn_if_positive),
@@ -385,7 +399,8 @@ class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
     def update_counters(self, counters: ReceiverCounters) -> None:
         timestamp = time.time()
         counter_sensors = ['bytes', 'packets', 'batches',
-                           'heaps', 'too-old-heaps', 'incomplete-heaps', 'bad-metadata-heaps']
+                           'heaps', 'too-old-heaps', 'incomplete-heaps', 'metadata-heaps',
+                           'bad-timestamp-heaps', 'bad-channel-heaps', 'bad-length-heaps']
         gauge_sensors = ['max-batch']
         for name in counter_sensors + gauge_sensors:
             sensor_name = 'input-{}{}'.format(name, '' if name in gauge_sensors else '-total')
