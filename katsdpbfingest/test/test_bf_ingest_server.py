@@ -67,7 +67,7 @@ class TestCaptureServer(asynctest.TestCase):
         self.n_channels = 1024
         self.spectra_per_heap = 256
         # No data actually travels through these multicast groups;
-        # it gets mocks out to use the inproc transport instead.
+        # it gets mocked out to use the inproc transport instead.
         self.endpoints = endpoint.endpoint_list_parser(self.port)(
             '239.102.2.0+7:{}'.format(self.port))
         self.inproc_queues = {endpoint: spead2.InprocQueue() for endpoint in self.endpoints}
@@ -181,13 +181,20 @@ class TestCaptureServer(asynctest.TestCase):
         ig.add_item(name='bf_raw', id=0x5000,
                     description='Beamformer data',
                     shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
-        streams = [spead2.send.InprocStream(spead2.ThreadPool(), self.inproc_queues[ep], config)
-                   for ep in self.endpoints]
+        # To guarantee in-order delivery (and hence make the test
+        # reliable/reproducible), we send all the data for the channels of
+        # interest through a single inproc queue. Data for channels outside the
+        # subscribed range is left with its normal queue.
         subscribed_streams = self.args.channels // self.channels_per_endpoint
         subscribed_bengs = self.args.channels // self.channels_per_heap
         expected_heaps = 0
-        for i, stream in enumerate(streams):
-            stream.set_cnt_sequence(i, len(streams))
+        streams = []
+        for i, ep in enumerate(self.endpoints):
+            if i in subscribed_streams:
+                ep = self.endpoints[subscribed_streams.start]
+            stream = spead2.send.InprocStream(spead2.ThreadPool(), self.inproc_queues[ep], config)
+            streams.append(stream)
+            stream.set_cnt_sequence(i, len(self.endpoints))
             stream.send_heap(ig.get_heap(descriptors='all'))
             stream.send_heap(ig.get_start())
             if i in subscribed_streams:
