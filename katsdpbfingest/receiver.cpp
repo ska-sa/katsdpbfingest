@@ -253,6 +253,11 @@ std::uint8_t *receiver::allocate(std::size_t size, const spead2::recv::packet_he
         q::spectra spectrum;
         std::size_t heap_offset;
         q::heaps present_idx;
+        /* Each heap goes through parse_timestamp_channel twice (once here,
+         * once when it's complete), so we pass quiet=true to avoid logging
+         * errors twice. Incomplete heaps won't go through the second round,
+         * but they are counted in the incomplete heaps counter.
+         */
         if (parse_timestamp_channel(timestamp, channel,
                                     spectrum, heap_offset, present_idx, true))
         {
