@@ -130,12 +130,16 @@ void receiver::emplace_readers()
 bool receiver::parse_timestamp_channel(
     q::ticks timestamp, q::channels channel,
     q::spectra &spectrum,
-    std::size_t &heap_offset, q::heaps &present_idx)
+    std::size_t &heap_offset, q::heaps &present_idx, bool quiet)
 {
     if (timestamp < first_timestamp)
     {
-        log_format(spead2::log_level::warning, "timestamp %1% pre-dates start %2%, discarding",
-                   timestamp, first_timestamp);
+        if (!quiet)
+        {
+            counters.too_old_heaps++;
+            log_format(spead2::log_level::debug, "timestamp %1% pre-dates start %2%, discarding",
+                       timestamp, first_timestamp);
+        }
         return false;
     }
     bool have_first = (first_timestamp != q::ticks(-1));
@@ -145,20 +149,32 @@ bool receiver::parse_timestamp_channel(
     q::channels one_heap_f = freq_sys.convert_one<units::heaps::freq, units::channels>();
     if (rel % one_heap_ts)
     {
-        log_format(spead2::log_level::warning, "timestamp %1% is not properly aligned to %2%, discarding",
-                   timestamp, one_heap_ts);
+        if (!quiet)
+        {
+            counters.bad_timestamp_heaps++;
+            log_format(spead2::log_level::debug, "timestamp %1% is not properly aligned to %2%, discarding",
+                       timestamp, one_heap_ts);
+        }
         return false;
     }
     if (channel % one_heap_f)
     {
-        log_format(spead2::log_level::warning, "frequency %1% is not properly aligned to %2%, discarding",
-                   channel, one_heap_f);
+        if (!quiet)
+        {
+            counters.bad_channel_heaps++;
+            log_format(spead2::log_level::debug, "frequency %1% is not properly aligned to %2%, discarding",
+                       channel, one_heap_f);
+        }
         return false;
     }
     if (channel < channel_offset || channel >= one_slice_f + channel_offset)
     {
-        log_format(spead2::log_level::warning, "frequency %1% is outside of range [%2%, %3%), discarding",
-                   channel, channel_offset, one_slice_f + channel_offset);
+        if (!quiet)
+        {
+            counters.bad_channel_heaps++;
+            log_format(spead2::log_level::debug, "frequency %1% is outside of range [%2%, %3%), discarding",
+                       channel, channel_offset, one_slice_f + channel_offset);
+        }
         return false;
     }
 
@@ -237,8 +253,13 @@ std::uint8_t *receiver::allocate(std::size_t size, const spead2::recv::packet_he
         q::spectra spectrum;
         std::size_t heap_offset;
         q::heaps present_idx;
+        /* Each heap goes through parse_timestamp_channel twice (once here,
+         * once when it's complete), so we pass quiet=true to avoid logging
+         * errors twice. Incomplete heaps won't go through the second round,
+         * but they are counted in the incomplete heaps counter.
+         */
         if (parse_timestamp_channel(timestamp, channel,
-                                    spectrum, heap_offset, present_idx))
+                                    spectrum, heap_offset, present_idx, true))
         {
             slice *s = get_slice(timestamp, spectrum);
             if (s)
@@ -350,20 +371,20 @@ void receiver::heap_ready(const spead2::recv::heap &h)
     }
     // Metadata heaps won't have a timestamp
     if (timestamp == q::ticks(-1) || data_item == nullptr)
+    {
+        counters.metadata_heaps++;
         return;
+    }
 
     q::spectra spectrum;
     std::size_t heap_offset;
     q::heaps present_idx;
     if (!parse_timestamp_channel(timestamp, channel, spectrum, heap_offset, present_idx))
-    {
-        counters.bad_metadata_heaps++;
         return;
-    }
     if (data_item->length != payload_size)
     {
-        counters.bad_metadata_heaps++;
-        log_format(spead2::log_level::warning, "bf_raw item has wrong length (%1% != %2%), discarding",
+        counters.bad_length_heaps++;
+        log_format(spead2::log_level::debug, "bf_raw item has wrong length (%1% != %2%), discarding",
                    data_item->length, payload_size);
         return;
     }
