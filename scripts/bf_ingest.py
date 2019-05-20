@@ -19,7 +19,7 @@ def on_shutdown(server: KatcpCaptureServer) -> None:
     server.halt()
 
 
-async def main() -> None:
+def main() -> None:
     katsdpservices.setup_logging()
     katsdpservices.setup_restart()
 
@@ -36,11 +36,11 @@ async def main() -> None:
     server = KatcpCaptureServer(args, loop)
     loop.add_signal_handler(signal.SIGINT, lambda: on_shutdown(server))
     loop.add_signal_handler(signal.SIGTERM, lambda: on_shutdown(server))
-    await server.start()
-    await server.join()
+    with katsdpservices.start_aiomonitor(loop, args, locals()):
+        loop.run_until_complete(server.start())
+        loop.run_until_complete(server.join())
+    loop.close()
 
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
-    loop.close()
+    main()

@@ -486,6 +486,7 @@ def parse_args(args=None, namespace=None):
     parser.add_argument(
         '--stats-interface', type=str,
         help='Network interface for signal display stream')
+    parser.add_aiomonitor_arguments()
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
     args = parser.parse_args(args, namespace)
