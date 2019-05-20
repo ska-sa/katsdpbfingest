@@ -93,7 +93,7 @@ setup(
         'h5py',
         'numpy',
         'aiokatcp',
-        'katsdpservices',
+        'katsdpservices[argparse,aiomonitor]',
         'katsdptelstate',
         'spead2'
     ],
