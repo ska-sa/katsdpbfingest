@@ -92,7 +92,7 @@ class TestCaptureServer(asynctest.TestCase):
         }
         telstate = katsdptelstate.TelescopeState()
         for key, value in attrs.items():
-            telstate.add(key, value, immutable=True)
+            telstate[key] = value
         stats_int_time = (self.heaps_per_stats * self.ticks_between_spectra *
                           self.spectra_per_heap / self.adc_sample_rate)
         self.args = bf_ingest_server.parse_args([
