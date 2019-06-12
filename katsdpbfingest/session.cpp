@@ -72,8 +72,8 @@ void session::run_impl()
     spead2::ringbuffer<slice> &ring = recv.ring;
     spead2::ringbuffer<slice> &free_ring = recv.free_ring;
 
-    const unit_system<std::int64_t, units::bytes, units::ticks, units::spectra, units::heaps::time, units::slices::time> time_sys(
-        2 * sizeof(std::int8_t), config.ticks_between_spectra, config.spectra_per_heap,
+    const unit_system<std::int64_t, units::bytes, units::spectra, units::heaps::time, units::slices::time> time_sys(
+        2 * sizeof(std::int8_t), config.spectra_per_heap,
         config.heaps_per_slice_time);
     const unit_system<std::int64_t, units::channels, units::heaps::freq, units::slices::freq> freq_sys(
         config.channels_per_heap, config.channels / config.channels_per_heap);
@@ -102,6 +102,8 @@ void session::run_impl()
             freq_sys.scale_factor<units::slices::freq, units::channels>()
             * time_sys.convert<units::bytes>(check_cadence);
         reserve_blocks = (1024 * 1024 * 1024 + check_bytes.get()) / stat.f_bsize;
+        log_format(spead2::log_level::info, "capture will stop when disk space is %d bytes",
+                   reserve_blocks * stat.f_bsize);
     }
 
     bool done = false;
@@ -129,7 +131,8 @@ void session::run_impl()
                             throw std::system_error(errno, std::system_category(), "fstatfs failed");
                         if (stat.f_bavail < reserve_blocks)
                         {
-                            log_message(spead2::log_level::info, "stopping capture due to lack of free space");
+                            log_format(spead2::log_level::info, "stopping capture due to lack of free space: have %d blocks of %d, need %d",
+                                       stat.f_bavail, stat.f_bsize, reserve_blocks);
                             done = true;
                         }
                     }
