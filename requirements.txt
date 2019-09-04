@@ -17,5 +17,5 @@ redis                     # via katsdptelstate
 six                       # via h5py, spead2
 spead2
 terminaltables            # via aiomonitor
-git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
-git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
+katsdpservices @ git+https://git@github.com/ska-sa/katsdpservices
+katsdptelstate @ git+https://git@github.com/ska-sa/katsdptelstate
