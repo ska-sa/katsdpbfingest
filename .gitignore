@@ -1,2 +1,9 @@
 /katsdpbfingest/_bf_ingest*.so
+*.py[cod]
+build
+dist
+temp
+cover
+.coverage
 .mypy_cache
+*.egg-info
