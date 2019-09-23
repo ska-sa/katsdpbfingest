@@ -1,5 +1,6 @@
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-build as build
-MAINTAINER Bruce Merry "bmerry@ska.ac.za"
+ARG KATSDPDOCKERBASE_REGISTRY=quay.io/ska-sa
+
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
 
 # Build libhdf5 from source so that the direct I/O VFD can be used.
 # The other flags are a subset of those used by debian.rules (subsetted
@@ -11,7 +12,8 @@ USER root
 
 WORKDIR /tmp
 ENV HDF5_VERSION=1.10.3
-RUN wget "http://sdp-services.kat.ac.za/mirror/www.hdfgroup.org/package/source-bzip/index.html%3Fwpdmdl=12594" -O hdf5-$HDF5_VERSION.tar.bz2
+ARG KATSDPDOCKERBASE_MIRROR=http://sdp-services.kat.ac.za/mirror
+RUN mirror_wget https://s3.amazonaws.com/hdf-wordpress-1/wp-content/uploads/manual/HDF5/hdf5-$HDF5_VERSION.tar.bz2 -O hdf5-$HDF5_VERSION.tar.bz2
 RUN tar -jxf hdf5-$HDF5_VERSION.tar.bz2
 WORKDIR /tmp/hdf5-$HDF5_VERSION
 RUN ./configure --prefix=/usr/local --enable-build-mode=production --enable-threadsafe \
@@ -44,8 +46,8 @@ RUN pip check
 
 #######################################################################
 
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-runtime
-MAINTAINER Bruce Merry "bmerry@ska.ac.za"
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
+LABEL maintainer="sdpdev+katsdpbfingest@ska.ac.za"
 
 COPY --from=build /libhdf5-install /
 USER root

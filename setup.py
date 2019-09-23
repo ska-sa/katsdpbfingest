@@ -80,9 +80,9 @@ extensions = [
 
 setup(
     name="katsdpbfingest",
-    description="Karoo Array Telescope Data Capture",
-    author="Bruce Merry",
-    author_email="bmerry@ska.ac.za",
+    description="MeerKAT beamformer data capture",
+    author="MeerKAT SDP team",
+    author_email="sdpdev+katsdpbfingest@ska.ac.za",
     packages=find_packages(),
     ext_package='katsdpbfingest',
     ext_modules=extensions,
