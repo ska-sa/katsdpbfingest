@@ -56,14 +56,18 @@ class BuildExt(build_ext):
         build_ext.run(self)
 
 
+sources = (glob.glob('spead2/src/common_*.cpp') +
+           glob.glob('spead2/src/recv_*.cpp') +
+           glob.glob('spead2/src/send_*.cpp') +
+           glob.glob('spead2/src/py_common.cpp') +
+           glob.glob('katsdpbfingest/*.cpp'))
+# Generated file might or might not be matched by the file now
+if 'spead2/src/common_ibv_loader.cpp' not in sources:
+    sources.append('spead2/src/common_ibv_loader.cpp')
 extensions = [
     Extension(
         '_bf_ingest',
-        sources=(glob.glob('spead2/src/common_*.cpp') +
-                 glob.glob('spead2/src/recv_*.cpp') +
-                 glob.glob('spead2/src/send_*.cpp') +
-                 glob.glob('spead2/src/py_common.cpp') +
-                 glob.glob('katsdpbfingest/*.cpp')),
+        sources=sources,
         depends=(glob.glob('spead2/include/spead2/*.h') +
                  glob.glob('spead2/3rdparty/pybind11/include/pybind11/*.h') +
                  glob.glob('spead2/3rdparty/pybind11/include/pybind11/detail/*.h') +
