@@ -23,7 +23,7 @@ RUN make -j4
 RUN make DESTDIR=/libhdf5-install install
 RUN make install
 RUN ldconfig
-RUN echo -e "Name: HDF5\nDescription: Hierarchical Data Format 5 (HDF5)\nVersion: $HDF5_VERSION\nRequires:\nCflags: -I/usr/local/include\nLibs: -L/usr/local/lib -lhdf5" \
+RUN echo "Name: HDF5\nDescription: Hierarchical Data Format 5 (HDF5)\nVersion: $HDF5_VERSION\nRequires:\nCflags: -I/usr/local/include\nLibs: -L/usr/local/lib -lhdf5" \
         > /usr/lib/x86_64-linux-gnu/pkgconfig/hdf5.pc
 USER kat
 

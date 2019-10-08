@@ -7,3 +7,4 @@ cover
 .coverage
 .mypy_cache
 *.egg-info
+pip-wheel-metadata

@@ -88,7 +88,6 @@ setup(
     ext_modules=extensions,
     cmdclass={'build_ext': BuildExt},
     scripts=["scripts/bf_ingest.py"],
-    setup_requires=['katversion', 'pkgconfig'],
     install_requires=[
         'h5py',
         'numpy',

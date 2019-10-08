@@ -6,12 +6,10 @@ decorator                 # via aiokatcp
 fakeredis                 # via katsdptelstate
 h5py
 ipaddress                 # via katsdptelstate
-katversion
 hiredis                   # via katsdptelstate
 msgpack                   # via katsdptelstate
 netifaces                 # via katsdptelstate
 numpy
-pkgconfig==1.2.2
 pygelf                    # via katsdpservices
 redis                     # via katsdptelstate
 six                       # via h5py, spead2
