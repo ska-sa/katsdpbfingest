@@ -15,7 +15,7 @@ pkgconfig==1.2.2
 pygelf                    # via katsdpservices
 redis                     # via katsdptelstate
 six                       # via h5py, spead2
-spead2
+spead2==1.14.0            # Pinned at older version until upgrade can be debugged
 terminaltables            # via aiomonitor
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
