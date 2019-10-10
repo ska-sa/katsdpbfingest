@@ -45,11 +45,6 @@ void session_config::add_endpoint(const std::string &bind_host, std::uint16_t po
     endpoints.emplace_back(boost::asio::ip::address_v4::from_string(bind_host), port);
 }
 
-void session_config::add_inproc(std::shared_ptr<spead2::inproc_queue> queue)
-{
-    inproc_queues.push_back(std::move(queue));
-}
-
 std::string session_config::get_interface_address() const
 {
     return interface_address.to_string();
@@ -110,7 +105,5 @@ const session_config &session_config::validate() const
         throw std::invalid_argument("scale_factor_timestamp <= 0");
     if (heaps_per_slice_time <= 0)
         throw std::invalid_argument("heaps_per_slice_time <= 0");
-    if (!endpoints.empty() && !inproc_queues.empty())
-        throw std::invalid_argument("endpoints and inproc queues can't both be used");
     return *this;
 }

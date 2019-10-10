@@ -128,6 +128,11 @@ def create_session_config(args: argparse.Namespace) -> SessionConfig:
     return config
 
 
+def session_factory(config: SessionConfig) -> Session:
+    """Thin wrapper around :class:`_bf_ingest.Session` constructor to ease mocking."""
+    return Session(config)
+
+
 class _CaptureSession:
     """Object encapsulating a co-routine that runs for a single capture session
     (from ``capture-init`` to end of stream or ``capture-done``).
@@ -168,7 +173,7 @@ class _CaptureSession:
         self.stream_name = stream_name
         self.update_counters = update_counters
         self._config = config
-        self._session = Session(config)
+        self._session = session_factory(config)
         self._run_future = loop.create_task(self._run())
 
     def _write_metadata(self) -> None:

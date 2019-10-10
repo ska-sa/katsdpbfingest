@@ -9,7 +9,7 @@
 #include <spead2/recv_heap.h>
 #include <spead2/recv_udp_ibv.h>
 #include <spead2/recv_udp.h>
-#include <spead2/recv_inproc.h>
+#include <spead2/recv_tcp.h>
 #include <spead2/recv_utils.h>
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_endian.h>
@@ -90,15 +90,8 @@ slice receiver::make_slice()
 
 void receiver::emplace_readers()
 {
-    if (!config.inproc_queues.empty())
-    {
-        log_format(spead2::log_level::info, "Listening to %1% in-process queues",
-                   config.inproc_queues.size());
-        for (const auto &queue : config.inproc_queues)
-            stream.emplace_reader<spead2::recv::inproc_reader>(queue);
-    }
 #if SPEAD2_USE_IBV
-    else if (use_ibv)
+    if (use_ibv)
     {
         log_format(spead2::log_level::info, "Listening on %1% with interface %2% using ibverbs",
                    config.endpoints_str, config.interface_address);
@@ -125,6 +118,12 @@ void receiver::emplace_readers()
             stream.emplace_reader<spead2::recv::udp_reader>(
                 endpoint, config.max_packet, config.buffer_size);
     }
+}
+
+void receiver::add_tcp_reader(const spead2::socket_wrapper<boost::asio::ip::tcp::acceptor> &acceptor)
+{
+    stream.emplace_reader<spead2::recv::tcp_reader>(
+        acceptor.copy(stream.get_io_service()), config.max_packet);
 }
 
 bool receiver::parse_timestamp_channel(

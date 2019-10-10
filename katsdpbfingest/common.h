@@ -9,8 +9,8 @@
 #include <boost/asio.hpp>
 #include <boost/format.hpp>
 #include <spead2/common_logging.h>
-#include <spead2/common_inproc.h>
 #include <spead2/recv_udp_ibv.h>
+#include <spead2/recv_tcp.h>
 #include "units.h"
 
 // Forward-declare to avoid sucking in pybind11.h
@@ -256,7 +256,6 @@ struct session_config
 {
     std::experimental::optional<std::string> filename;
     std::vector<boost::asio::ip::udp::endpoint> endpoints;
-    std::vector<std::shared_ptr<spead2::inproc_queue>> inproc_queues;
     std::string endpoints_str;   ///< Human-readable version of endpoints
     boost::asio::ip::address interface_address;
 
@@ -294,7 +293,6 @@ struct session_config
 
     explicit session_config(const std::string &filename);
     void add_endpoint(const std::string &bind_host, std::uint16_t port);
-    void add_inproc(std::shared_ptr<spead2::inproc_queue> queue);
     std::string get_interface_address() const;
     void set_interface_address(const std::string &address);
 

@@ -8,6 +8,7 @@ import contextlib
 import socket
 import asyncio
 from unittest import mock
+from typing import List, Optional
 
 import h5py
 import numpy as np
@@ -59,6 +60,13 @@ class TestSession:
         _bf_ingest.Session(config)
 
 
+def _make_listen_socket():
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    sock.listen()
+    return sock
+
+
 class TestCaptureServer(asynctest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp()
@@ -67,10 +75,11 @@ class TestCaptureServer(asynctest.TestCase):
         self.n_channels = 1024
         self.spectra_per_heap = 256
         # No data actually travels through these multicast groups;
-        # it gets mocked out to use the inproc transport instead.
+        # it gets mocked out to use local TCP sockets instead.
         self.endpoints = endpoint.endpoint_list_parser(self.port)(
             '239.102.2.0+7:{}'.format(self.port))
-        self.inproc_queues = {endpoint: spead2.InprocQueue() for endpoint in self.endpoints}
+        self.tcp_acceptors = [_make_listen_socket() for endpoint in self.endpoints]
+        self.tcp_endpoints = [endpoint.Endpoint(*sock.getsockname()) for sock in self.tcp_acceptors]
         self.n_bengs = 16
         self.ticks_between_spectra = 8192
         self.adc_sample_rate = 1712000000.0
@@ -108,12 +117,11 @@ class TestCaptureServer(asynctest.TestCase):
         self.loop = asyncio.get_event_loop()
         self.patch_add_endpoint()
         self.patch_create_session_config()
+        self.patch_session_factory()
 
     def patch_add_endpoint(self):
-        def add_endpoint(config: _bf_ingest.SessionConfig, host: str, port: int) -> None:
-            config.add_inproc(self.inproc_queues[endpoint.Endpoint(host, port)])
-
-        patcher = mock.patch.object(_bf_ingest.SessionConfig, 'add_endpoint', add_endpoint)
+        """Prevent actual endpoints from being added, since we're using TCP instead."""
+        patcher = mock.patch.object(_bf_ingest.SessionConfig, 'add_endpoint')
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -131,6 +139,18 @@ class TestCaptureServer(asynctest.TestCase):
         orig_create_session_config = bf_ingest_server.create_session_config
         patcher = mock.patch.object(
             bf_ingest_server, 'create_session_config', create_session_config)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def patch_session_factory(self):
+        def session_factory(config: _bf_ingest.SessionConfig) -> _bf_ingest.Session:
+            session = _bf_ingest.Session(config)
+            for sock in self.tcp_acceptors:
+                session.add_tcp_reader(sock)
+                sock.close()
+            return session
+
+        patcher = mock.patch.object(bf_ingest_server, 'session_factory', session_factory)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -183,22 +203,30 @@ class TestCaptureServer(asynctest.TestCase):
                     shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
         # To guarantee in-order delivery (and hence make the test
         # reliable/reproducible), we send all the data for the channels of
-        # interest through a single inproc queue. Data for channels outside the
-        # subscribed range is left with its normal queue.
+        # interest through a single TCP socket. Data for channels outside the
+        # subscribed range is discarded. Note that giving multiple TcpStream's
+        # the same socket is dangerous because individual write() calls could
+        # interleave; it's safe only because we use only blocking calls so
+        # there is no concurrency between the streams.
         subscribed_streams = self.args.channels // self.channels_per_endpoint
         subscribed_bengs = self.args.channels // self.channels_per_heap
         expected_heaps = 0
-        streams = []
-        for i, ep in enumerate(self.endpoints):
-            if i in subscribed_streams:
-                ep = self.endpoints[subscribed_streams.start]
-            stream = spead2.send.InprocStream(spead2.ThreadPool(), self.inproc_queues[ep], config)
+        streams = []    # type: List[Optional[spead2.send.TcpStream]]
+        primary_ep = self.tcp_endpoints[subscribed_streams.start]
+        sock = socket.socket()
+        sock.setblocking(False)
+        await self.loop.sock_connect(sock, (primary_ep.host, primary_ep.port))
+        for i in range(len(self.endpoints)):
+            if i not in subscribed_streams:
+                streams.append(None)
+                continue
+            stream = spead2.send.TcpStream(spead2.ThreadPool(), sock, config)
             streams.append(stream)
             stream.set_cnt_sequence(i, len(self.endpoints))
             stream.send_heap(ig.get_heap(descriptors='all'))
             stream.send_heap(ig.get_start())
-            if i in subscribed_streams:
-                expected_heaps += 2
+            expected_heaps += 2
+        sock.close()
         ts = 1234567890
         for i in range(n_heaps):
             data = np.zeros((self.n_channels, self.spectra_per_heap, 2), np.int8)
@@ -216,13 +244,19 @@ class TestCaptureServer(asynctest.TestCase):
                     # The receiver looks at inline items in each packet to place
                     # data correctly.
                     heap.repeat_pointers = True
-                    streams[j // (self.n_bengs // len(self.endpoints))].send_heap(heap)
                     if j in subscribed_bengs:
+                        out_stream = streams[j // (self.n_bengs // len(self.endpoints))]
+                        assert out_stream is not None
+                        out_stream.send_heap(heap)
                         expected_heaps += 1
             ts += self.spectra_per_heap * self.ticks_between_spectra
         if end:
-            for stream in streams:
-                stream.send_heap(ig.get_end())
+            for out_stream in streams:
+                if out_stream is not None:
+                    out_stream.send_heap(ig.get_end())
+                    # They're all pointing at the same receiver, which will
+                    # shut down after the first stop heap
+                    break
         streams = []
 
         if not end:

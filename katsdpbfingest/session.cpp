@@ -162,3 +162,8 @@ std::int64_t session::get_first_timestamp() const
         throw std::runtime_error("cannot retrieve first_timestamp while running");
     return recv.get_first_timestamp().get();
 }
+
+void session::add_tcp_reader(const spead2::socket_wrapper<boost::asio::ip::tcp::acceptor> &acceptor)
+{
+    recv.add_tcp_reader(acceptor);
+}

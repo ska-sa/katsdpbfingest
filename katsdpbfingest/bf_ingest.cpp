@@ -86,7 +86,6 @@ PYBIND11_MODULE(_bf_ingest, m)
         .def_readwrite("scale_factor_timestamp", &session_config::scale_factor_timestamp)
         .def_readwrite("channel_offset", &session_config::channel_offset)
         .def("add_endpoint", &session_config::add_endpoint, "bind_host"_a, "port"_a)
-        .def("add_inproc", &session_config::add_inproc, "queue"_a)
         .def_property("stats_interface_address", &session_config::get_stats_interface_address, &session_config::set_stats_interface_address)
         .def("set_stats_endpoint", &session_config::set_stats_endpoint, "host"_a, "port"_a)
         .def("validate", &session_config::validate)
@@ -113,6 +112,7 @@ PYBIND11_MODULE(_bf_ingest, m)
         .def("stop_stream", &session::stop_stream)
         .def_property_readonly("counters", &session::get_counters)
         .def_property_readonly("first_timestamp", &session::get_first_timestamp)
+        .def("add_tcp_reader", &session::add_tcp_reader)
     ;
 
     py::object logging_module = py::module::import("logging");
