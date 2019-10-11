@@ -8,6 +8,7 @@
 #include <spead2/recv_heap.h>
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_memory_allocator.h>
+#include <spead2/py_common.h>
 #include "common.h"
 
 class receiver;
@@ -220,6 +221,9 @@ public:
 
     explicit receiver(const session_config &config);
     ~receiver();
+
+    /// Add a TCP socket receiver to a running receiver (for testing only!)
+    void add_tcp_reader(const spead2::socket_wrapper<boost::asio::ip::tcp::acceptor> &acceptor);
 
     /// Stop immediately, without flushing any slices
     void stop();

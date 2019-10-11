@@ -27,6 +27,9 @@ public:
 
     receiver_counters get_counters() const;
     std::int64_t get_first_timestamp() const;
+
+    // For unit tests
+    void add_tcp_reader(const spead2::socket_wrapper<boost::asio::ip::tcp::acceptor> &acceptor);
 };
 
 #endif // SESSION_H

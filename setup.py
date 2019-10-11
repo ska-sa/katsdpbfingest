@@ -13,7 +13,7 @@ except ImportError:
     hdf5 = collections.defaultdict(list)
 
 
-tests_require = ['nose', 'spead2>=1.11.1', 'asynctest']
+tests_require = ['nose', 'spead2>=2.0.0', 'asynctest']
 
 
 class get_include:
@@ -35,7 +35,7 @@ class get_include:
 class BuildExt(build_ext):
     def run(self):
         self.mkpath(self.build_temp)
-        subprocess.check_call(['./bootstrap.sh', '--no-python'], cwd='spead2')
+        subprocess.check_call(['./bootstrap.sh'], cwd='spead2')
         subprocess.check_call(os.path.abspath('spead2/configure'), cwd=self.build_temp)
         # Ugly hack to add libraries conditional on configure result
         have_ibv = False
@@ -56,14 +56,18 @@ class BuildExt(build_ext):
         build_ext.run(self)
 
 
+sources = (glob.glob('spead2/src/common_*.cpp') +
+           glob.glob('spead2/src/recv_*.cpp') +
+           glob.glob('spead2/src/send_*.cpp') +
+           glob.glob('spead2/src/py_common.cpp') +
+           glob.glob('katsdpbfingest/*.cpp'))
+# Generated file might or might not be matched by the file now
+if 'spead2/src/common_ibv_loader.cpp' not in sources:
+    sources.append('spead2/src/common_ibv_loader.cpp')
 extensions = [
     Extension(
         '_bf_ingest',
-        sources=(glob.glob('spead2/src/common_*.cpp') +
-                 glob.glob('spead2/src/recv_*.cpp') +
-                 glob.glob('spead2/src/send_*.cpp') +
-                 glob.glob('spead2/src/py_common.cpp') +
-                 glob.glob('katsdpbfingest/*.cpp')),
+        sources=sources,
         depends=(glob.glob('spead2/include/spead2/*.h') +
                  glob.glob('spead2/3rdparty/pybind11/include/pybind11/*.h') +
                  glob.glob('spead2/3rdparty/pybind11/include/pybind11/detail/*.h') +
@@ -88,7 +92,6 @@ setup(
     ext_modules=extensions,
     cmdclass={'build_ext': BuildExt},
     scripts=["scripts/bf_ingest.py"],
-    setup_requires=['katversion', 'pkgconfig'],
     install_requires=[
         'h5py',
         'numpy',
