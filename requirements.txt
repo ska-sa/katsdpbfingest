@@ -3,7 +3,6 @@ aiokatcp
 aiomonitor
 async-timeout             # via aiokatcp
 decorator                 # via aiokatcp
-fakeredis                 # via katsdptelstate
 h5py
 hiredis                   # via katsdptelstate
 msgpack                   # via katsdptelstate
