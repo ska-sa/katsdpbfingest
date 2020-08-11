@@ -97,7 +97,7 @@ setup(
         'numpy',
         'aiokatcp',
         'katsdpservices[argparse,aiomonitor]',
-        'katsdptelstate',
+        'katsdptelstate >= 0.10',
         'spead2'
     ],
     extras_require={
