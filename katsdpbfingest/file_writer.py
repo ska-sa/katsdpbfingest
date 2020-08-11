@@ -29,7 +29,7 @@ def set_telescope_state(h5_file: h5py.File,
         [('timestamp', np.float64),
          ('value', h5py.special_dtype(vlen=np.uint8))])
     for key in tstate_keys:
-        if not tstate.is_immutable(key):
+        if tstate.key_type(key) == katsdptelstate.KeyType.MUTABLE:
             # retrieve all values for a particular key
             sensor_values = tstate.get_range(key, st=start_timestamp,
                                              include_previous=True, return_encoded=True)
