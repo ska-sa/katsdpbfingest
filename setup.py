@@ -13,7 +13,7 @@ except ImportError:
     hdf5 = collections.defaultdict(list)
 
 
-tests_require = ['nose', 'spead2>=2.0.0', 'asynctest']
+tests_require = ['nose', 'spead2>=2.0.0,<3', 'asynctest']
 
 
 class get_include:
@@ -98,7 +98,7 @@ setup(
         'aiokatcp',
         'katsdpservices[argparse,aiomonitor]',
         'katsdptelstate >= 0.10',
-        'spead2'
+        'spead2<3'
     ],
     extras_require={
         'test': tests_require
