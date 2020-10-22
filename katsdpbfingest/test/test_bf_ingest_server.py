@@ -160,7 +160,7 @@ class TestCaptureServer(asynctest.TestCase):
         assert_false(server.capturing)
         await server.start_capture('1122334455')
         assert_true(server.capturing)
-        await asyncio.sleep(0.01, loop=self.loop)
+        await asyncio.sleep(0.01)
         await server.stop_capture()
         assert_false(server.capturing)
 
@@ -180,8 +180,11 @@ class TestCaptureServer(asynctest.TestCase):
         # Start a receiver to get the signal display stream.
         # It needs a deep queue because we don't service it while it is
         # running.
-        rx = spead2.recv.Stream(spead2.ThreadPool(), max_heaps=2, ring_heaps=100)
-        rx.stop_on_stop_item = False
+        rx = spead2.recv.Stream(
+            spead2.ThreadPool(),
+            spead2.recv.StreamConfig(max_heaps=2, stop_on_stop_item=False),
+            spead2.recv.RingStreamConfig(heaps=100)
+        )
         rx.add_udp_reader(self.args.stats.host, self.args.stats.port,
                           interface_address='127.0.0.1')
 

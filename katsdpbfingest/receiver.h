@@ -25,7 +25,7 @@ private:
     virtual void stop_received() override;
 
 public:
-    bf_stream(receiver &recv, std::size_t max_heaps);
+    bf_stream(receiver &recv, const spead2::recv::stream_config &stream_config);
     virtual ~bf_stream() override;
 };
 
@@ -130,6 +130,9 @@ private:
 
     /// Create a single fully-allocated slice
     slice make_slice();
+
+    /// Create the stream configuration for the stream
+    spead2::recv::stream_config make_stream_config();
 
     /// Add the readers to the already-allocated stream
     void emplace_readers();

@@ -1,33 +1,17 @@
 #!/usr/bin/env python3
 from setuptools import setup, find_packages, Extension
 from distutils.command.build_ext import build_ext     # type: ignore  # typeshed doesn't capture it
+import configparser
 import glob
-import importlib
 import subprocess
 import os.path
-try:
-    import pkgconfig
-    hdf5 = pkgconfig.parse('hdf5')
-except ImportError:
-    import collections
-    hdf5 = collections.defaultdict(list)
+
+import pybind11
+import pkgconfig
 
 
-tests_require = ['nose', 'spead2>=2.0.0,<3', 'asynctest']
-
-
-class get_include:
-    """Helper class to defer importing a module until build time for fetching
-    the include directory.
-    """
-    def __init__(self, module, *args, **kwargs):
-        self.module = module
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        module = importlib.import_module(self.module)
-        return getattr(module, 'get_include')(*self.args, **self.kwargs)
+hdf5 = pkgconfig.parse('hdf5')
+tests_require = ['nose', 'spead2>=3.0.0', 'asynctest']
 
 
 # Hack: this is copied and edited from spead2, so that we can run configure
@@ -37,23 +21,13 @@ class BuildExt(build_ext):
         self.mkpath(self.build_temp)
         subprocess.check_call(['./bootstrap.sh'], cwd='spead2')
         subprocess.check_call(os.path.abspath('spead2/configure'), cwd=self.build_temp)
-        # Ugly hack to add libraries conditional on configure result
-        have_ibv = False
-        have_pcap = False
-        with open(os.path.join(self.build_temp, 'include', 'spead2', 'common_features.h')) as f:
-            for line in f:
-                if line.strip() == '#define SPEAD2_USE_IBV 1':
-                    have_ibv = True
-                elif line.strip() == '#define SPEAD2_USE_PCAP 1':
-                    have_pcap = True
+        config = configparser.ConfigParser()
+        config.read(os.path.join(self.build_temp, 'python-build.cfg'))
         for extension in self.extensions:
-            if have_ibv:
-                extension.libraries.extend(['rdmacm', 'ibverbs'])
-            if have_pcap:
-                extension.libraries.extend(['pcap'])
+            extension.extra_compile_args.extend(config['compiler']['CFLAGS'].split())
+            extension.extra_link_args.extend(config['compiler']['LIBS'].split())
             extension.include_dirs.insert(0, os.path.join(self.build_temp, 'include'))
-        # distutils uses old-style classes, so no super
-        build_ext.run(self)
+        super().run()
 
 
 sources = (glob.glob('spead2/src/common_*.cpp') +
@@ -61,19 +35,23 @@ sources = (glob.glob('spead2/src/common_*.cpp') +
            glob.glob('spead2/src/send_*.cpp') +
            glob.glob('spead2/src/py_common.cpp') +
            glob.glob('katsdpbfingest/*.cpp'))
-# Generated file might or might not be matched by the file now
-if 'spead2/src/common_ibv_loader.cpp' not in sources:
-    sources.append('spead2/src/common_ibv_loader.cpp')
+# Generated files: might be missing from sources
+gen_sources = [
+    'spead2/src/common_loader_ibv.cpp',
+    'spead2/src/common_loader_rdmacm.cpp',
+    'spead2/src/common_loader_mlx5dv.cpp'
+]
+for source in gen_sources:
+    if source not in sources:
+        sources.append(source)
 extensions = [
     Extension(
         '_bf_ingest',
         sources=sources,
         depends=(glob.glob('spead2/include/spead2/*.h') +
-                 glob.glob('spead2/3rdparty/pybind11/include/pybind11/*.h') +
-                 glob.glob('spead2/3rdparty/pybind11/include/pybind11/detail/*.h') +
                  glob.glob('katsdpbfingest/*.h')),
         language='c++',
-        include_dirs=['spead2/include', 'spead2/3rdparty/pybind11/include'] + hdf5['include_dirs'],
+        include_dirs=['spead2/include', pybind11.get_include()] + hdf5['include_dirs'],
         define_macros=hdf5['define_macros'],
         extra_compile_args=['-std=c++14', '-g0', '-O3', '-fvisibility=hidden'],
         library_dirs=hdf5['library_dirs'],
@@ -98,7 +76,7 @@ setup(
         'aiokatcp',
         'katsdpservices[argparse,aiomonitor]',
         'katsdptelstate >= 0.10',
-        'spead2<3'
+        'spead2 >= 3.0.0'
     ],
     extras_require={
         'test': tests_require

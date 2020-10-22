@@ -205,7 +205,7 @@ class _CaptureSession:
                 # defined by extensions. Hence the lambda.
                 join_future = self._loop.run_in_executor(pool, lambda: self._session.join())
                 # Update the sensors once per second until termination
-                while not (await asyncio.wait([join_future], loop=self._loop, timeout=1.0))[0]:
+                while not (await asyncio.wait([join_future], timeout=1.0))[0]:
                     self.update_counters(self._session.counters)
                 await join_future   # To re-raise any exception
                 counters = self._session.counters
