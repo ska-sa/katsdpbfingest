@@ -1,6 +1,6 @@
 ARG KATSDPDOCKERBASE_REGISTRY=quay.io/ska-sa
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build:new-rdma-core as build
 
 # Build libhdf5 from source so that the direct I/O VFD can be used.
 # The other flags are a subset of those used by debian.rules (subsetted

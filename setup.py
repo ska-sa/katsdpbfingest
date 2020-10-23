@@ -11,7 +11,7 @@ import pkgconfig
 
 
 hdf5 = pkgconfig.parse('hdf5')
-tests_require = ['nose', 'spead2>=3.0.0', 'asynctest']
+tests_require = ['nose', 'spead2>=3.0.1', 'asynctest']
 
 
 # Hack: this is copied and edited from spead2, so that we can run configure
@@ -76,7 +76,7 @@ setup(
         'aiokatcp',
         'katsdpservices[argparse,aiomonitor]',
         'katsdptelstate >= 0.10',
-        'spead2 >= 3.0.0'
+        'spead2 >= 3.0.1'
     ],
     extras_require={
         'test': tests_require
