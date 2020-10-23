@@ -11,6 +11,7 @@
 #include <spead2/recv_udp.h>
 #include <spead2/recv_tcp.h>
 #include <spead2/recv_utils.h>
+#include <spead2/common_features.h>
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_endian.h>
 #include <pybind11/pybind11.h>
@@ -103,8 +104,9 @@ void receiver::emplace_readers()
                 .set_buffer_size(config.buffer_size)
                 .set_comp_vector(config.comp_vector));
     }
+    else
 #endif
-    else if (!config.interface_address.is_unspecified())
+    if (!config.interface_address.is_unspecified())
     {
         log_format(spead2::log_level::info, "Listening on %1% with interface %2%",
                    config.endpoints_str, config.interface_address);
