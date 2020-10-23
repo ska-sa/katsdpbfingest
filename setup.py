@@ -6,11 +6,18 @@ import glob
 import subprocess
 import os.path
 
-import pybind11
-import pkgconfig
+try:
+    import pybind11
+    import pkgconfig
+    hdf5 = pkgconfig.parse('hdf5')
+    pybind11_include = pybind11.get_include()
+except ImportError:
+    # Just to make "./setup.py clean" work
+    import collections
+    hdf5 = collections.defaultdict(list)
+    pybind11_include = ''
 
 
-hdf5 = pkgconfig.parse('hdf5')
 tests_require = ['nose', 'spead2>=3.0.1', 'asynctest']
 
 
@@ -51,7 +58,7 @@ extensions = [
         depends=(glob.glob('spead2/include/spead2/*.h') +
                  glob.glob('katsdpbfingest/*.h')),
         language='c++',
-        include_dirs=['spead2/include', pybind11.get_include()] + hdf5['include_dirs'],
+        include_dirs=['spead2/include', pybind11_include] + hdf5['include_dirs'],
         define_macros=hdf5['define_macros'],
         extra_compile_args=['-std=c++14', '-g0', '-O3', '-fvisibility=hidden'],
         library_dirs=hdf5['library_dirs'],
