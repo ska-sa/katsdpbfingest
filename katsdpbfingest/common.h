@@ -11,6 +11,7 @@
 #include <spead2/common_features.h>
 #include <spead2/common_logging.h>
 #include <spead2/recv_udp_ibv.h>
+#include <spead2/recv_udp.h>
 #include <spead2/recv_tcp.h>
 #include "units.h"
 
