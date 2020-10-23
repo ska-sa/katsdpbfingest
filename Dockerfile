@@ -46,7 +46,7 @@ RUN pip check
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime:new-rdma-core
 LABEL maintainer="sdpdev+katsdpbfingest@ska.ac.za"
 
 COPY --from=build /libhdf5-install /
