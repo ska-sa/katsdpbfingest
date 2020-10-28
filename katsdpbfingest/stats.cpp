@@ -230,8 +230,8 @@ stats_collector::stats_collector(const session_config &config)
     scale_factor_timestamp(config.scale_factor_timestamp),
     freq_sys(config.get_freq_system()),
     time_sys(config.get_time_system()),
-    stream(io_service, config.stats_endpoint,
-           spead2::send::stream_config(8872),
+    stream(io_service, {config.stats_endpoint},
+           spead2::send::stream_config().set_max_packet_size(8872),
            spead2::send::udp_stream::default_buffer_size,
            1, config.stats_interface_address)
 {

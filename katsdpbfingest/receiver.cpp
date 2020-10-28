@@ -11,6 +11,7 @@
 #include <spead2/recv_udp.h>
 #include <spead2/recv_tcp.h>
 #include <spead2/recv_utils.h>
+#include <spead2/common_features.h>
 #include <spead2/common_ringbuffer.h>
 #include <spead2/common_endian.h>
 #include <pybind11/pybind11.h>
@@ -26,8 +27,8 @@ bf_stream::~bf_stream()
     stop();
 }
 
-bf_stream::bf_stream(receiver &recv, std::size_t max_heaps)
-    : spead2::recv::stream(recv.worker, 0, max_heaps),
+bf_stream::bf_stream(receiver &recv, const spead2::recv::stream_config &stream_config)
+    : spead2::recv::stream(recv.worker, stream_config),
     recv(recv)
 {
 }
@@ -96,13 +97,16 @@ void receiver::emplace_readers()
         log_format(spead2::log_level::info, "Listening on %1% with interface %2% using ibverbs",
                    config.endpoints_str, config.interface_address);
         stream.emplace_reader<spead2::recv::udp_ibv_reader>(
-            config.endpoints, config.interface_address,
-            config.max_packet,
-            config.buffer_size,
-            config.comp_vector);
+            spead2::recv::udp_ibv_config()
+                .set_endpoints(config.endpoints)
+                .set_interface_address(config.interface_address)
+                .set_max_size(config.max_packet)
+                .set_buffer_size(config.buffer_size)
+                .set_comp_vector(config.comp_vector));
     }
+    else
 #endif
-    else if (!config.interface_address.is_unspecified())
+    if (!config.interface_address.is_unspecified())
     {
         log_format(spead2::log_level::info, "Listening on %1% with interface %2%",
                    config.endpoints_str, config.interface_address);
@@ -220,7 +224,7 @@ slice *receiver::get_slice(q::ticks timestamp, q::spectra spectrum)
         }
         return s;
     }
-    catch (spead2::ringbuffer_stopped)
+    catch (spead2::ringbuffer_stopped &)
     {
         return nullptr;
     }
@@ -448,7 +452,7 @@ void receiver::stop_received()
         {
             flush_all();
         }
-        catch (spead2::ringbuffer_stopped)
+        catch (spead2::ringbuffer_stopped &)
         {
             // can get here if we were called via receiver::stop
         }
@@ -473,6 +477,22 @@ void receiver::stop()
     stream.stop();
 }
 
+spead2::recv::stream_config receiver::make_stream_config()
+{
+    spead2::recv::stream_config stream_config;
+    stream_config.set_max_heaps(
+        std::max(1, config.channels / config.channels_per_heap) * config.live_heaps_per_substream);
+    stream_config.set_memory_allocator(std::make_shared<bf_raw_allocator>(*this));
+    stream_config.set_memcpy(
+        [this](const spead2::memory_allocator::pointer &allocation,
+               const spead2::recv::packet_header &packet)
+        {
+            packet_memcpy(allocation, packet);
+        });
+    stream_config.set_allow_unsized_heaps(false);
+    return stream_config;
+}
+
 receiver::receiver(const session_config &config)
     : window<slice, receiver>(window_size),
     config(config),
@@ -481,7 +501,7 @@ receiver::receiver(const session_config &config)
     time_sys(config.get_time_system()),
     payload_size(2 * sizeof(std::int8_t) * config.spectra_per_heap * config.channels_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
-    stream(*this, std::max(1, config.channels / config.channels_per_heap) * config.live_heaps_per_substream),
+    stream(*this, make_stream_config()),
     counters_timer(worker.get_io_service()),
     ring(config.ring_slots),
     free_ring(window_size + config.ring_slots + 1)
@@ -518,22 +538,11 @@ receiver::receiver(const session_config &config)
         for (std::size_t i = 0; i < window_size + config.ring_slots + 1; i++)
             free_ring.push(make_slice());
 
-        std::shared_ptr<spead2::memory_allocator> allocator =
-            std::make_shared<bf_raw_allocator>(*this);
-        stream.set_memory_allocator(std::move(allocator));
-        stream.set_memcpy(
-            [this](const spead2::memory_allocator::pointer &allocation,
-                   const spead2::recv::packet_header &packet)
-            {
-                packet_memcpy(allocation, packet);
-            });
-        stream.set_allow_unsized_heaps(false);
-
         emplace_readers();
         // Start periodic updates
         refresh_counters_periodic(boost::system::error_code());
     }
-    catch (std::exception)
+    catch (std::exception &)
     {
         /* Normally we can rely on the destructor to call stop() (which is
          * necessary to ensure that the stream isn't going to make more calls

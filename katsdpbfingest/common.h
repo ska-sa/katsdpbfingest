@@ -8,8 +8,10 @@
 #include <experimental/optional>
 #include <boost/asio.hpp>
 #include <boost/format.hpp>
+#include <spead2/common_features.h>
 #include <spead2/common_logging.h>
 #include <spead2/recv_udp_ibv.h>
+#include <spead2/recv_udp.h>
 #include <spead2/recv_tcp.h>
 #include "units.h"
 
@@ -259,7 +261,11 @@ struct session_config
     std::string endpoints_str;   ///< Human-readable version of endpoints
     boost::asio::ip::address interface_address;
 
-    std::size_t max_packet = spead2::recv::udp_ibv_reader::default_max_size;
+#if SPEAD2_USE_IBV
+    std::size_t max_packet = spead2::recv::udp_ibv_config::default_max_size;
+#else
+    std::size_t max_packet = spead2::recv::udp_reader::default_max_size;
+#endif
     std::size_t buffer_size = 64 * 1024 * 1024;
     int live_heaps_per_substream = 2;
     int ring_slots = 2;      // Caller should increase it
