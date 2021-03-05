@@ -1,17 +1,8 @@
-aioconsole                # via aiomonitor
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
+
 aiokatcp
-aiomonitor
-async-timeout             # via aiokatcp
-decorator                 # via aiokatcp
 h5py
-hiredis                   # via katsdptelstate
-msgpack                   # via katsdptelstate
-netifaces                 # via katsdptelstate
 numpy
-pygelf                    # via katsdpservices
-redis                     # via katsdptelstate
-six                       # via h5py, spead2
 spead2
-terminaltables            # via aiomonitor
-katsdpservices @ git+https://github.com/ska-sa/katsdpservices
+katsdpservices[argparse,aiomonitor] @ git+https://github.com/ska-sa/katsdpservices
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
