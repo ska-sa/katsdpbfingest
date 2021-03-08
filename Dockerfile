@@ -34,7 +34,7 @@ ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
 WORKDIR /tmp/install
 RUN /bin/echo -e '[build_ext]\nlibrary-dirs=/usr/local/lib' > setup.cfg
-RUN install-requirements.py --no-binary=h5py -d ~/docker-base/base-requirements.txt -r /tmp/install/requirements.txt
+RUN install_pinned.py --no-binary=h5py -r /tmp/install/requirements.txt
 
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpbfingest
