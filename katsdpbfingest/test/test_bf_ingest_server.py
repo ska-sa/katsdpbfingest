@@ -203,7 +203,8 @@ class TestCaptureServer(asynctest.TestCase):
                     shape=(), format=[('u', 48)])
         ig.add_item(name='bf_raw', id=0x5000,
                     description='Beamformer data',
-                    shape=(self.channels_per_heap, self.spectra_per_heap, 2), dtype=np.int8)
+                    shape=(self.channels_per_heap, self.spectra_per_heap, 2),
+                    dtype=np.dtype(np.int8))
         # To guarantee in-order delivery (and hence make the test
         # reliable/reproducible), we send all the data for the channels of
         # interest through a single TCP socket. Data for channels outside the
@@ -313,9 +314,9 @@ class TestCaptureServer(asynctest.TestCase):
                                     self.args.channels.stop // self.channels_per_heap]
                 np.testing.assert_equal(expected, flags)
 
-                data = h5file['/Data']
-                assert_equal('i0_tied_array_channelised_voltage_0x', data.attrs['stream_name'])
-                assert_equal(self.args.channels.start, data.attrs['channel_offset'])
+                data_set = h5file['/Data']
+                assert_equal('i0_tied_array_channelised_voltage_0x', data_set.attrs['stream_name'])
+                assert_equal(self.args.channels.start, data_set.attrs['channel_offset'])
         else:
             assert_is_none(filename)
 
