@@ -290,7 +290,7 @@ class TestCaptureServer(asynctest.TestCase):
                     channel0 = i * self.channels_per_heap
                     spectrum0 = j * self.spectra_per_heap
                     index = np.s_[channel0 : channel0 + self.channels_per_heap,
-                                  spectrum0 : spectrum0 + self.spectra_per_heap, ...]
+                                  spectrum0 : spectrum0 + self.spectra_per_heap]
                     expected_data[index] = 0
                     expected_weight[index] = 0
         expected_data = expected_data[self.args.channels.asslice()]
