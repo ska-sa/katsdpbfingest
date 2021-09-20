@@ -69,8 +69,7 @@ void session::run_impl()
     if (config.disk_affinity >= 0)
         spead2::thread_pool::set_affinity(config.disk_affinity);
 
-    spead2::ringbuffer<slice> &ring = recv.ring;
-    spead2::ringbuffer<slice> &free_ring = recv.free_ring;
+    auto ring = recv.stream.get_data_ringbuffer();
 
     const unit_system<std::int64_t, units::bytes, units::spectra, units::heaps::time, units::slices::time> time_sys(
         2 * sizeof(std::int8_t), config.spectra_per_heap,
@@ -113,12 +112,12 @@ void session::run_impl()
     {
         try
         {
-            slice s = ring.pop();
+            std::unique_ptr<slice> s(static_cast<slice *>(ring->pop().release()));
             if (stats)
-                stats->add(s);
+                stats->add(*s);
             if (w)
-                w->add(s);
-            q::heaps_t time_heaps = time_sys.convert_down<units::heaps::time>(s.spectrum) + q::heaps_t(1);
+                w->add(*s);
+            q::heaps_t time_heaps = time_sys.convert_down<units::heaps::time>(s->spectrum) + q::heaps_t(1);
             q::heaps total_heaps = time_heaps * freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
             if (total_heaps > n_total_heaps)
             {
@@ -141,7 +140,7 @@ void session::run_impl()
                     next_check = (time_heaps / check_cadence + 1) * check_cadence;
                 }
             }
-            free_ring.push(std::move(s));
+            recv.stream.add_free_chunk(std::move(s));
         }
         catch (spead2::ringbuffer_stopped &e)
         {
@@ -151,9 +150,9 @@ void session::run_impl()
     recv.stop();
 }
 
-receiver_counters session::get_counters() const
+spead2::recv::stream_stats session::get_counters() const
 {
-    return recv.get_counters();
+    return recv.stream.get_stats();
 }
 
 std::int64_t session::get_first_timestamp() const

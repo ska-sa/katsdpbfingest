@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <future>
+#include <spead2/recv_stream.h>
 #include "common.h"
 #include "receiver.h"
 #include "session.h"
@@ -25,7 +26,7 @@ public:
     void join();
     void stop_stream();
 
-    receiver_counters get_counters() const;
+    spead2::recv::stream_stats get_counters() const;
     std::int64_t get_first_timestamp() const;
 
     // For unit tests
