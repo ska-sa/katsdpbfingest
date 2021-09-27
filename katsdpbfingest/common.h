@@ -159,9 +159,6 @@ std::vector<int> affinity_vector(int affinity);
  * whole of the frequency axis, and some fixed number of heaps in the time
  * axis. It corresponds to the HDF5 chunk size for the data, so needs to be
  * large enough to be spread across the stripes in a RAID.
- *
- * When a slice is first retrieved from the ringbuffer, the fields defined here
- * are undefined. One must call receiver::fix_slice to populate them.
  */
 class slice : public spead2::recv::chunk
 {

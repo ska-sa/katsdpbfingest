@@ -31,28 +31,6 @@ constexpr int receiver::bf_raw_id;
 constexpr int receiver::timestamp_id;
 constexpr int receiver::frequency_id;
 
-class aligned_allocator : public spead2::memory_allocator
-{
-private:
-    virtual void free(std::uint8_t *ptr, void *user) override
-    {
-        std::free(ptr);
-    }
-
-public:
-    virtual pointer allocate(std::size_t size, void *hint) override
-    {
-        auto ptr = make_aligned<std::uint8_t>(size);
-        pointer out(ptr.get(), deleter(shared_from_this(), nullptr));
-        ptr.release();
-        return out;
-    }
-};
-
-// TODO: make spead2's memory_allocator::pointer constructible from any unique_ptr
-static auto aligned_allocator_instance = std::make_shared<aligned_allocator>();
-static auto allocator_instance = std::make_shared<spead2::memory_allocator>();
-
 std::unique_ptr<slice> receiver::make_slice()
 {
     std::unique_ptr<slice> s{new slice};
@@ -62,10 +40,10 @@ std::unique_ptr<slice> receiver::make_slice()
     auto present_size =
         time_sys.convert_one<units::slices::time, units::heaps::time>()
         * freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
-    s->data = aligned_allocator_instance->allocate(slice::bytes(slice_samples), nullptr);
+    s->data = make_aligned<std::uint8_t>(slice::bytes(slice_samples));
     // Fill the data just to pre-fault it
     std::memset(s->data.get(), 0, slice::bytes(slice_samples));
-    s->present = allocator_instance->allocate(present_size.get(), nullptr);
+    s->present = std::make_unique<std::uint8_t[]>(present_size.get());
     s->present_size = present_size.get();
     return s;
 }
