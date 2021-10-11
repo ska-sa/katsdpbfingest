@@ -22,6 +22,9 @@ static constexpr std::size_t bad_timestamp_heaps = 1;
 static constexpr std::size_t bad_channel_heaps = 2;
 static constexpr std::size_t bad_length_heaps = 3;
 static constexpr std::size_t before_start_heaps = 4;
+static constexpr std::size_t data_heaps = 5;
+static constexpr std::size_t total_heaps = 6;
+static constexpr std::size_t bytes = 7;
 
 } // namespace counters
 

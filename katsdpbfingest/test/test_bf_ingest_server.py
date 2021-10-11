@@ -268,11 +268,11 @@ class TestCaptureServer(asynctest.TestCase):
             # have been received, but time out after 5 seconds to avoid
             # hanging the test.
             for i in range(100):
-                if server.counters.raw_heaps >= expected_heaps:
+                if server.counters['heaps'] >= expected_heaps:
                     break
                 else:
                     print('Only {} / {} heaps received so far'.format(
-                          server.counters.raw_heaps, expected_heaps))
+                          server.counters['heaps'], expected_heaps))
                     await asyncio.sleep(0.05)
             else:
                 print('Giving up waiting for heaps')

@@ -173,13 +173,11 @@ void receiver::finish_slice(slice &s, std::uint64_t *counter_stats) const
     s.spectrum = time_sys.convert<units::spectra>(slice_id);
     s.timestamp = time_sys.convert<units::ticks>(s.spectrum) + first_timestamp;
 
-#if 0 // TODO move these to session?
-    counters.heaps += s.n_present.get();
-    counters.bytes += s.n_present.get() * payload_size;
-    q::slices_t slice_id = time_sys.convert_down<units::slices::time>(s.spectrum);
-    std::int64_t total_heaps = (slice_id.get() + 1) * s.present.size();
-    counters.total_heaps = std::max(counters.total_heaps, total_heaps);
-#endif
+    counter_stats[counters::data_heaps] += s.n_present.get();
+    counter_stats[counters::bytes] += s.n_present.get() * payload_size;
+    std::int64_t total_heaps = (slice_id.get() + 1) * s.present_size;
+    if (total_heaps > counter_stats[counters::total_heaps])
+        counter_stats[counters::total_heaps] = total_heaps;
 
     // If any heaps got lost, fill them with zeros
     if (n_present != s.present_size)
@@ -313,6 +311,10 @@ spead2::recv::stream_config receiver::make_stream_config()
     stream_config.add_stat("katsdpbfingest.bad_channel_heaps");
     stream_config.add_stat("katsdpbfingest.bad_length_heaps");
     stream_config.add_stat("katsdpbfingest.before_start_heaps");
+    stream_config.add_stat("katsdpbfingest.data_heaps");
+    stream_config.add_stat("katsdpbfingest.total_heaps",
+                           spead2::recv::stream_stat_config::mode::MAXIMUM);
+    stream_config.add_stat("katsdpbfingest.bytes");
     return stream_config;
 }
 
@@ -350,7 +352,7 @@ receiver::receiver(const session_config &config)
 {
     py::gil_scoped_release gil;
 
-    counter_base = stream.get_config().get_stat_index("metadata_heaps");
+    counter_base = stream.get_config().get_stat_index("katsdpbfingest.metadata_heaps");
     try
     {
         if (config.ibv)

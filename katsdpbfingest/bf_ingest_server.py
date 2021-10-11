@@ -210,12 +210,13 @@ class _CaptureSession:
                 await join_future   # To re-raise any exception
                 counters = self._session.counters
                 self.update_counters(counters)
-                if counters.heaps > 0 and self.filename is not None:
+                if counters["katsdpbfingest.data_heaps"] > 0 and self.filename is not None:
                     # Write the metadata to file
                     self._write_metadata()
-                _logger.info('Capture complete, %d heaps, of which %d dropped',
-                             counters.total_heaps,
-                             counters.total_heaps - counters.heaps)
+                _logger.info(
+                    'Capture complete, %d heaps, of which %d dropped',
+                    counters["katsdpbfingest.total_heaps"],
+                    counters["katsdpbfingest.total_heaps"] - counters["katsdpbfingest.data_heaps"])
             except Exception:
                 _logger.error("Capture threw exception", exc_info=True)
 
@@ -403,17 +404,28 @@ class KatcpCaptureServer(CaptureServer, aiokatcp.DeviceServer):
 
     def update_counters(self, counters: ReceiverCounters) -> None:
         timestamp = time.time()
-        counter_sensors = ['bytes', 'packets', 'batches',
-                           'heaps', 'too-old-heaps', 'incomplete-heaps', 'metadata-heaps',
-                           'bad-timestamp-heaps', 'bad-channel-heaps', 'bad-length-heaps']
-        gauge_sensors = ['max-batch']
-        for name in counter_sensors + gauge_sensors:
-            sensor_name = 'input-{}{}'.format(name, '' if name in gauge_sensors else '-total')
+        # Map sensor name to counter name
+        sensors = {
+            'input-bytes-total': 'katsdpbfingest.bytes',
+            'input-packets-total': 'packets',
+            'input-batches-total': 'batches',
+            'input-heaps-total': 'katsdpbfingest.data_heaps',
+            'input-too-old-heaps-total': 'too_old_heaps',
+            'input-incomplete-heaps-total': 'incomplete_heaps_evicted',
+            'input-metadata-heaps-total': 'katsdpbfingest.metadata_heaps',
+            'input-bad-timestamp-heaps-total': 'katsdpbfingest.bad_timestamp_heaps',
+            'input-bad-channel-heaps-total': 'katsdpbfingest.bad_channel_heaps',
+            'input-bad-length-heaps-total': 'katsdpbfingest.bad_length_heaps',
+            'input-max-batch': 'max_batch'
+        }
+        for sensor_name, counter_name in sensors.items():
             sensor = self.sensors[sensor_name]
-            value = getattr(counters, name.replace('-', '_'))
+            value = counters[counter_name]
             sensor.set_value(value, timestamp=timestamp)
         self.sensors['input-missing-heaps-total'].set_value(
-            counters.total_heaps - counters.heaps, timestamp=timestamp)
+            counters["katsdpbfingest.total_heaps"] - counters["katsdpbfingest.data_heaps"],
+            timestamp=timestamp
+        )
 
     async def request_capture_init(self, ctx, capture_block_id: str) -> None:
         """Start capture to file."""
