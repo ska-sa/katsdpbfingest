@@ -13,6 +13,7 @@
 #include <spead2/recv_udp_ibv.h>
 #include <spead2/recv_udp.h>
 #include <spead2/recv_tcp.h>
+#include <spead2/recv_chunk_stream.h>
 #include "units.h"
 
 // Forward-declare to avoid sucking in pybind11.h
@@ -159,13 +160,12 @@ std::vector<int> affinity_vector(int affinity);
  * axis. It corresponds to the HDF5 chunk size for the data, so needs to be
  * large enough to be spread across the stripes in a RAID.
  */
-struct slice
+class slice : public spead2::recv::chunk
 {
+public:
     q::ticks timestamp{-1};            ///< Timestamp (of the first heap)
     q::spectra spectrum{-1};           ///< Number of spectra since start (for first heap)
     q::heaps n_present{0};             ///< Number of 1 bits in @a present
-    aligned_ptr<std::uint8_t> data;    ///< Payload: channel-major, time-minor
-    std::vector<bool> present;         ///< Bitmask of present heaps: channel-major, time-minor
 
     /// Number of bytes for n samples of data
     static std::size_t bytes(q::samples n);

@@ -90,21 +90,13 @@ PYBIND11_MODULE(_bf_ingest, m)
         .def("set_stats_endpoint", &session_config::set_stats_endpoint, "host"_a, "port"_a)
         .def("validate", &session_config::validate)
     ;
-    py::class_<receiver_counters>(m, "ReceiverCounters", "Heap counters for a live capture session")
-        .def(py::init<>())
-        .def_readwrite("heaps", &receiver_counters::heaps)
-        .def_readwrite("bytes", &receiver_counters::bytes)
-        .def_readwrite("packets", &receiver_counters::packets)
-        .def_readwrite("batches", &receiver_counters::batches)
-        .def_readwrite("max_batch", &receiver_counters::max_batch)
-        .def_readwrite("total_heaps", &receiver_counters::total_heaps)
-        .def_readwrite("too_old_heaps", &receiver_counters::too_old_heaps)
-        .def_readwrite("incomplete_heaps", &receiver_counters::incomplete_heaps)
-        .def_readwrite("metadata_heaps", &receiver_counters::metadata_heaps)
-        .def_readwrite("bad_timestamp_heaps", &receiver_counters::bad_timestamp_heaps)
-        .def_readwrite("bad_channel_heaps", &receiver_counters::bad_channel_heaps)
-        .def_readwrite("bad_length_heaps", &receiver_counters::bad_length_heaps)
-        .def_readwrite("raw_heaps", &receiver_counters::raw_heaps)
+    // Declared module-local to prevent conflicts with spead2's registration
+    py::class_<spead2::recv::stream_stats>(m, "ReceiverCounters", py::module_local(),
+                                           "Heap counters for a live capture session")
+        .def("__getitem__", [](spead2::recv::stream_stats &stats, const std::string &name)
+        {
+            return stats[name];
+        })
     ;
     py::class_<session>(m, "Session", "Capture session")
         .def(py::init<const session_config &>(), "config"_a)

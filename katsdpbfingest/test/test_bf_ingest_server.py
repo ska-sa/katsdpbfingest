@@ -268,11 +268,11 @@ class TestCaptureServer(asynctest.TestCase):
             # have been received, but time out after 5 seconds to avoid
             # hanging the test.
             for i in range(100):
-                if server.counters.raw_heaps >= expected_heaps:
+                if server.counters['heaps'] >= expected_heaps:
                     break
                 else:
                     print('Only {} / {} heaps received so far'.format(
-                          server.counters.raw_heaps, expected_heaps))
+                          server.counters['heaps'], expected_heaps))
                     await asyncio.sleep(0.05)
             else:
                 print('Giving up waiting for heaps')
@@ -290,7 +290,7 @@ class TestCaptureServer(asynctest.TestCase):
                     channel0 = i * self.channels_per_heap
                     spectrum0 = j * self.spectra_per_heap
                     index = np.s_[channel0 : channel0 + self.channels_per_heap,
-                                  spectrum0 : spectrum0 + self.spectra_per_heap, ...]
+                                  spectrum0 : spectrum0 + self.spectra_per_heap]
                     expected_data[index] = 0
                     expected_weight[index] = 0
         expected_data = expected_data[self.args.channels.asslice()]

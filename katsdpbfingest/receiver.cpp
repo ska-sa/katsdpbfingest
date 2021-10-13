@@ -1,15 +1,19 @@
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <functional>
 #include <chrono>
 #include <mutex>
 #include <algorithm>
+#include <numeric>
 #include <spead2/recv_stream.h>
+#include <spead2/recv_chunk_stream.h>
 #include <spead2/recv_heap.h>
 #include <spead2/recv_udp_ibv.h>
 #include <spead2/recv_udp.h>
 #include <spead2/recv_tcp.h>
+#include <spead2/recv_mem.h>
 #include <spead2/recv_utils.h>
 #include <spead2/common_features.h>
 #include <spead2/common_ringbuffer.h>
@@ -22,70 +26,25 @@
 // having this file depend on pybind11.
 namespace py = pybind11;
 
-bf_stream::~bf_stream()
-{
-    stop();
-}
-
-bf_stream::bf_stream(receiver &recv, const spead2::recv::stream_config &stream_config)
-    : spead2::recv::stream(recv.worker, stream_config),
-    recv(recv)
-{
-}
-
-void bf_stream::heap_ready(spead2::recv::live_heap &&heap)
-{
-    if (!heap.is_contiguous())
-        return;
-    recv.heap_ready(spead2::recv::heap(std::move(heap)));
-}
-
-void bf_stream::stop_received()
-{
-    spead2::recv::stream::stop_received();
-    recv.stop_received();
-}
-
-
-bf_raw_allocator::bf_raw_allocator(receiver &recv) : recv(recv)
-{
-}
-
-bf_raw_allocator::pointer bf_raw_allocator::allocate(std::size_t size, void *hint)
-{
-    std::uint8_t *ptr = nullptr;
-    if (hint)
-        ptr = recv.allocate(size, *reinterpret_cast<const spead2::recv::packet_header *>(hint));
-    if (ptr)
-        return pointer(ptr, deleter(shared_from_this(), (void *) std::uintptr_t(true)));
-    else
-        return spead2::memory_allocator::allocate(size, hint);
-}
-
-void bf_raw_allocator::free(std::uint8_t *ptr, void *user)
-{
-    if (!user)
-        delete[] ptr;
-}
-
 constexpr std::size_t receiver::window_size;
 constexpr int receiver::bf_raw_id;
 constexpr int receiver::timestamp_id;
 constexpr int receiver::frequency_id;
 
-slice receiver::make_slice()
+std::unique_ptr<slice> receiver::make_slice()
 {
-    slice s;
+    std::unique_ptr<slice> s{new slice};
     auto slice_samples =
         time_sys.convert_one<units::slices::time, units::spectra>()
         * freq_sys.convert_one<units::slices::freq, units::channels>();
     auto present_size =
         time_sys.convert_one<units::slices::time, units::heaps::time>()
         * freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
-    s.data = make_aligned<std::uint8_t>(slice::bytes(slice_samples));
+    s->data = make_aligned<std::uint8_t>(slice::bytes(slice_samples));
     // Fill the data just to pre-fault it
-    std::memset(s.data.get(), 0, slice::bytes(slice_samples));
-    s.present.resize(present_size.get());
+    std::memset(s->data.get(), 0, slice::bytes(slice_samples));
+    s->present = std::make_unique<std::uint8_t[]>(present_size.get());
+    s->present_size = present_size.get();
     return s;
 }
 
@@ -133,13 +92,14 @@ void receiver::add_tcp_reader(const spead2::socket_wrapper<boost::asio::ip::tcp:
 bool receiver::parse_timestamp_channel(
     q::ticks timestamp, q::channels channel,
     q::spectra &spectrum,
-    std::size_t &heap_offset, q::heaps &present_idx, bool quiet)
+    std::size_t &heap_offset, q::heaps &present_idx,
+    std::uint64_t *counter_stats, bool quiet)
 {
     if (timestamp < first_timestamp)
     {
         if (!quiet)
         {
-            counters.too_old_heaps++;
+            counter_stats[counters::before_start_heaps]++;
             log_format(spead2::log_level::debug, "timestamp %1% pre-dates start %2%, discarding",
                        timestamp, first_timestamp);
         }
@@ -154,7 +114,7 @@ bool receiver::parse_timestamp_channel(
     {
         if (!quiet)
         {
-            counters.bad_timestamp_heaps++;
+            counter_stats[counters::bad_timestamp_heaps]++;
             log_format(spead2::log_level::debug, "timestamp %1% is not properly aligned to %2%, discarding",
                        timestamp, one_heap_ts);
         }
@@ -164,7 +124,7 @@ bool receiver::parse_timestamp_channel(
     {
         if (!quiet)
         {
-            counters.bad_channel_heaps++;
+            counter_stats[counters::bad_channel_heaps]++;
             log_format(spead2::log_level::debug, "frequency %1% is not properly aligned to %2%, discarding",
                        channel, one_heap_f);
         }
@@ -174,7 +134,7 @@ bool receiver::parse_timestamp_channel(
     {
         if (!quiet)
         {
-            counters.bad_channel_heaps++;
+            counter_stats[counters::bad_channel_heaps]++;
             log_format(spead2::log_level::debug, "frequency %1% is outside of range [%2%, %3%), discarding",
                        channel, channel_offset, one_slice_f + channel_offset);
         }
@@ -201,122 +161,53 @@ bool receiver::parse_timestamp_channel(
     return true;
 }
 
-slice *receiver::get_slice(q::ticks timestamp, q::spectra spectrum)
+void receiver::finish_slice(slice &s, std::uint64_t *counter_stats) const
 {
-    try
-    {
-        q::slices_t slice_id = time_sys.convert_down<units::slices::time>(spectrum);
-        slice *s = get(slice_id.get());
-        if (!s)
-        {
-            return nullptr;
-        }
-        if (!s->data)
-        {
-            *s = free_ring.pop();
-            s->timestamp = timestamp;
-            s->spectrum = time_sys.convert<units::spectra>(slice_id);
-            s->n_present = q::heaps(0);
-            // clear all the bits by resizing down to zero then back to original size
-            auto orig_size = s->present.size();
-            s->present.clear();
-            s->present.resize(orig_size);
-        }
-        return s;
-    }
-    catch (spead2::ringbuffer_stopped &)
-    {
-        return nullptr;
-    }
-}
+    std::size_t n_present = std::accumulate(s.present.get(),
+                                            s.present.get() + s.present_size, std::size_t(0));
+    s.n_present = q::heaps(n_present);
+    if (n_present == 0)
+        return;
 
-std::uint8_t *receiver::allocate(std::size_t size, const spead2::recv::packet_header &packet)
-{
-    if (state != state_t::DATA || size != payload_size)
-        return nullptr;
-    spead2::recv::pointer_decoder decoder(packet.heap_address_bits);
-    // Try to extract the timestamp and frequency
-    q::ticks timestamp{-1};
-    q::channels channel{0};
-    for (int i = 0; i < packet.n_items; i++)
-    {
-        spead2::item_pointer_t pointer = spead2::load_be<spead2::item_pointer_t>(packet.pointers + i * sizeof(pointer));
-        if (decoder.is_immediate(pointer))
-        {
-            int id = decoder.get_id(pointer);
-            if (id == timestamp_id)
-                timestamp = q::ticks(decoder.get_immediate(pointer));
-            else if (id == frequency_id)
-                channel = q::channels(decoder.get_immediate(pointer));
-        }
-    }
-    if (timestamp != q::ticks(-1))
-    {
-        // It's a data heap, so we should be able to use it
-        q::spectra spectrum;
-        std::size_t heap_offset;
-        q::heaps present_idx;
-        /* Each heap goes through parse_timestamp_channel twice (once here,
-         * once when it's complete), so we pass quiet=true to avoid logging
-         * errors twice. Incomplete heaps won't go through the second round,
-         * but they are counted in the incomplete heaps counter.
-         */
-        if (parse_timestamp_channel(timestamp, channel,
-                                    spectrum, heap_offset, present_idx, true))
-        {
-            slice *s = get_slice(timestamp, spectrum);
-            if (s)
-                return s->data.get() + heap_offset;
-        }
-    }
-    return nullptr;
-}
+    q::slices_t slice_id{s.chunk_id};
+    s.spectrum = time_sys.convert<units::spectra>(slice_id);
+    s.timestamp = time_sys.convert<units::ticks>(s.spectrum) + first_timestamp;
 
-void receiver::flush(slice &s)
-{
-    if (s.data)
-    {
-        counters.heaps += s.n_present.get();
-        counters.bytes += s.n_present.get() * payload_size;
-        q::slices_t slice_id = time_sys.convert_down<units::slices::time>(s.spectrum);
-        std::int64_t total_heaps = (slice_id.get() + 1) * s.present.size();
-        counters.total_heaps = std::max(counters.total_heaps, total_heaps);
+    counter_stats[counters::data_heaps] += s.n_present.get();
+    counter_stats[counters::bytes] += s.n_present.get() * payload_size;
+    std::int64_t total_heaps = (slice_id.get() + 1) * s.present_size;
+    if (total_heaps > counter_stats[counters::total_heaps])
+        counter_stats[counters::total_heaps] = total_heaps;
 
-        // If any heaps got lost, fill them with zeros
-        if (s.n_present != q::heaps(s.present.size()))
-        {
-            const q::heaps_f slice_heaps_f = freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
-            const q::heaps_t slice_heaps_t = time_sys.convert_one<units::slices::time, units::heaps::time>();
-            const std::size_t heap_row =
-                slice::bytes(time_sys.convert_one<units::heaps::time, units::spectra>() * q::channels(1));
-            const q::channels heap_channels = freq_sys.convert_one<units::heaps::freq, units::channels>();
-            const q::spectra stride = time_sys.convert_one<units::slices::time, units::spectra>();
-            const std::size_t stride_bytes = slice::bytes(stride * q::channels(1));
-            q::heaps present_idx{0};
-            for (q::heaps_f i{0}; i < slice_heaps_f; i++)
-                for (q::heaps_t j{0}; j < slice_heaps_t; j++, present_idx++)
-                    if (!s.present[present_idx.get()])
-                    {
-                        auto start_channel = freq_sys.convert<units::channels>(i);
-                        const q::samples dst_offset =
-                            start_channel * stride
-                            + time_sys.convert<units::spectra>(j) * q::channels(1);
-                        std::uint8_t *ptr = s.data.get() + slice::bytes(dst_offset);
-                        for (q::channels k{0}; k < heap_channels; k++, ptr += stride_bytes)
-                            std::memset(ptr, 0, heap_row);
-                    }
-        }
-        ring.push(std::move(s));
+    // If any heaps got lost, fill them with zeros
+    if (n_present != s.present_size)
+    {
+        const q::heaps_f slice_heaps_f = freq_sys.convert_one<units::slices::freq, units::heaps::freq>();
+        const q::heaps_t slice_heaps_t = time_sys.convert_one<units::slices::time, units::heaps::time>();
+        const std::size_t heap_row =
+            slice::bytes(time_sys.convert_one<units::heaps::time, units::spectra>() * q::channels(1));
+        const q::channels heap_channels = freq_sys.convert_one<units::heaps::freq, units::channels>();
+        const q::spectra stride = time_sys.convert_one<units::slices::time, units::spectra>();
+        const std::size_t stride_bytes = slice::bytes(stride * q::channels(1));
+        q::heaps present_idx{0};
+        for (q::heaps_f i{0}; i < slice_heaps_f; i++)
+            for (q::heaps_t j{0}; j < slice_heaps_t; j++, present_idx++)
+                if (!s.present[present_idx.get()])
+                {
+                    auto start_channel = freq_sys.convert<units::channels>(i);
+                    const q::samples dst_offset =
+                        start_channel * stride
+                        + time_sys.convert<units::spectra>(j) * q::channels(1);
+                    std::uint8_t *ptr = s.data.get() + slice::bytes(dst_offset);
+                    for (q::channels k{0}; k < heap_channels; k++, ptr += stride_bytes)
+                        std::memset(ptr, 0, heap_row);
+                }
     }
-    s.spectrum = q::spectra(-1);
 }
 
 void receiver::packet_memcpy(const spead2::memory_allocator::pointer &allocation,
                              const spead2::recv::packet_header &packet)
 {
-    if (!allocation.get_deleter().get_user())
-        return;
-
     typedef unit_system<std::int64_t, units::bytes, units::channels> stride_system;
     stride_system src_sys(
         slice::bytes(time_sys.convert_one<units::heaps::time, units::spectra>() * q::channels(1)));
@@ -356,124 +247,51 @@ void receiver::packet_memcpy(const spead2::memory_allocator::pointer &allocation
     }
 }
 
-void receiver::heap_ready(const spead2::recv::heap &h)
+void receiver::place(spead2::recv::chunk_place_data *data, std::size_t data_size)
 {
-    if (state != state_t::DATA)
-        return;
-    q::ticks timestamp{-1};
-    q::channels channel{0};
-    const spead2::recv::item *data_item = nullptr;
-    for (const auto &item : h.get_items())
+    // This assert will fail if the spead2 library at runtime is older than the
+    // version we were compiled against.
+    assert(data_size >= sizeof(*data));
+
+    q::ticks timestamp{data->items[0]};
+    q::channels channel{data->items[1]};
+    spead2::item_pointer_t heap_size = data->items[2];
+    // Metadata heaps will be missing timestamp and channel
+    std::uint64_t *counter_stats = data->batch_stats + counter_base;
+    if (timestamp == q::ticks(-1) || channel == q::channels(-1))
     {
-        if (item.id == timestamp_id)
-            timestamp = q::ticks(item.immediate_value);
-        else if (item.id == frequency_id)
-            channel = q::channels(item.immediate_value);
-        else if (item.id == bf_raw_id)
-            data_item = &item;
-    }
-    // Metadata heaps won't have a timestamp
-    if (timestamp == q::ticks(-1) || data_item == nullptr)
-    {
-        counters.metadata_heaps++;
+        counter_stats[counters::metadata_heaps]++;
         return;
     }
 
     q::spectra spectrum;
     std::size_t heap_offset;
     q::heaps present_idx;
-    if (!parse_timestamp_channel(timestamp, channel, spectrum, heap_offset, present_idx))
+    if (!parse_timestamp_channel(timestamp, channel, spectrum, heap_offset, present_idx,
+                                 counter_stats))
         return;
-    if (data_item->length != payload_size)
-    {
-        counters.bad_length_heaps++;
-        log_format(spead2::log_level::debug, "bf_raw item has wrong length (%1% != %2%), discarding",
-                   data_item->length, payload_size);
-        return;
-    }
 
-    slice *s = get_slice(timestamp, spectrum);
-    if (!s)
+    if (heap_size != payload_size)
     {
-        // Chunk has been flushed already, or we have been stopped
-        if (state == state_t::DATA)
-            counters.too_old_heaps++;
+        counter_stats[counters::bad_length_heaps]++;
+        log_format(spead2::log_level::debug, "heap has wrong length (%1% != %2%), discarding",
+                   heap_size, payload_size);
         return;
     }
 
-    std::uint8_t *ptr = s->data.get() + heap_offset;
-    if (data_item->ptr != ptr)
-    {
-        log_message(spead2::log_level::warning, "heap was not reconstructed in-place");
-        throw std::runtime_error("heap was not reconstructed in-place");
-    }
-    if (!s->present[present_idx.get()])
-    {
-        s->n_present++;
-        s->present[present_idx.get()] = true;
-    }
-}
-
-void receiver::refresh_counters_periodic(const boost::system::error_code &ec)
-{
-    using namespace std::placeholders;
-    if (ec == boost::asio::error::operation_aborted)
-        return;
-    else if (ec)
-        log_message(spead2::log_level::warning, "refresh_counters timer error");
-    counters_timer.expires_from_now(std::chrono::milliseconds(10));
-    counters_timer.async_wait(std::bind(&receiver::refresh_counters_periodic, this, _1));
-    refresh_counters();
-}
-
-void receiver::refresh_counters()
-{
-    auto stream_stats = stream.get_stats();
-    std::lock_guard<std::mutex> lock(counters_mutex);
-    counters_public = counters;
-    counters_public.packets = stream_stats.packets;
-    counters_public.batches = stream_stats.batches;
-    counters_public.raw_heaps = stream_stats.heaps;
-    counters_public.max_batch = stream_stats.max_batch;
-    counters_public.incomplete_heaps = stream_stats.incomplete_heaps_evicted;
-}
-
-receiver_counters receiver::get_counters() const
-{
-    std::lock_guard<std::mutex> lock(counters_mutex);
-    return counters_public;
-}
-
-void receiver::stop_received()
-{
-    if (state == state_t::DATA)
-    {
-        try
-        {
-            flush_all();
-        }
-        catch (spead2::ringbuffer_stopped &)
-        {
-            // can get here if we were called via receiver::stop
-        }
-    }
-    ring.stop();
-    counters_timer.cancel();
-    refresh_counters();
-    state = state_t::STOP;
+    data->chunk_id = time_sys.convert_down<units::slices::time>(spectrum).get();
+    data->heap_offset = heap_offset;
+    data->heap_index = present_idx.get();
 }
 
 void receiver::graceful_stop()
 {
-    stream.get_io_service().post([this] { stop_received(); });
+    // Abuse the fact that a mem_reader calls stop_received when it gets to the end
+    stream.emplace_reader<spead2::recv::mem_reader>(nullptr, 0);
 }
 
 void receiver::stop()
 {
-    /* Stop the ring first, so that we unblock the internals if they
-     * are waiting for space in ring.
-     */
-    ring.stop();
     stream.stop();
 }
 
@@ -482,32 +300,59 @@ spead2::recv::stream_config receiver::make_stream_config()
     spead2::recv::stream_config stream_config;
     stream_config.set_max_heaps(
         std::max(1, config.channels / config.channels_per_heap) * config.live_heaps_per_substream);
-    stream_config.set_memory_allocator(std::make_shared<bf_raw_allocator>(*this));
     stream_config.set_memcpy(
         [this](const spead2::memory_allocator::pointer &allocation,
                const spead2::recv::packet_header &packet)
         {
             packet_memcpy(allocation, packet);
         });
-    stream_config.set_allow_unsized_heaps(false);
+    stream_config.add_stat("katsdpbfingest.metadata_heaps");
+    stream_config.add_stat("katsdpbfingest.bad_timestamp_heaps");
+    stream_config.add_stat("katsdpbfingest.bad_channel_heaps");
+    stream_config.add_stat("katsdpbfingest.bad_length_heaps");
+    stream_config.add_stat("katsdpbfingest.before_start_heaps");
+    stream_config.add_stat("katsdpbfingest.data_heaps");
+    stream_config.add_stat("katsdpbfingest.total_heaps",
+                           spead2::recv::stream_stat_config::mode::MAXIMUM);
+    stream_config.add_stat("katsdpbfingest.bytes");
     return stream_config;
 }
 
+spead2::recv::chunk_stream_config receiver::make_chunk_stream_config()
+{
+    spead2::recv::chunk_stream_config config;
+    config.set_items({timestamp_id, frequency_id, spead2::item_id::HEAP_LENGTH_ID});
+    config.set_max_chunks(window_size);
+    config.set_place([this](spead2::recv::chunk_place_data *data, std::size_t data_size)
+    {
+        place(data, data_size);
+    });
+    config.set_ready([this](std::unique_ptr<spead2::recv::chunk> &&chunk, std::uint64_t *batch_stats)
+    {
+        finish_slice(static_cast<slice &>(*chunk), batch_stats + counter_base);
+    });
+    return config;
+}
+
+using ringbuffer_t = spead2::ringbuffer<std::unique_ptr<spead2::recv::chunk>>;
+
 receiver::receiver(const session_config &config)
-    : window<slice, receiver>(window_size),
-    config(config),
+    : config(config),
     channel_offset(config.channel_offset),
     freq_sys(config.get_freq_system()),
     time_sys(config.get_time_system()),
     payload_size(2 * sizeof(std::int8_t) * config.spectra_per_heap * config.channels_per_heap),
     worker(1, affinity_vector(config.network_affinity)),
-    stream(*this, make_stream_config()),
-    counters_timer(worker.get_io_service()),
-    ring(config.ring_slots),
-    free_ring(window_size + config.ring_slots + 1)
+    stream(
+        worker,
+        make_stream_config(),
+        make_chunk_stream_config(),
+        std::make_shared<ringbuffer_t>(config.ring_slots),
+        std::make_shared<ringbuffer_t>(window_size + config.ring_slots + 1))
 {
     py::gil_scoped_release gil;
 
+    counter_base = stream.get_config().get_stat_index("katsdpbfingest.metadata_heaps");
     try
     {
         if (config.ibv)
@@ -536,11 +381,9 @@ receiver::receiver(const session_config &config)
         }
 
         for (std::size_t i = 0; i < window_size + config.ring_slots + 1; i++)
-            free_ring.push(make_slice());
+            stream.add_free_chunk(make_slice());
 
         emplace_readers();
-        // Start periodic updates
-        refresh_counters_periodic(boost::system::error_code());
     }
     catch (std::exception &)
     {
@@ -549,6 +392,9 @@ receiver::receiver(const session_config &config)
          * into the receiver while it is being destroyed), but an exception
          * thrown from the constructor does not cause the destructor to get
          * called.
+         *
+         * TODO: is this still necessary? The stream now interacts directly
+         * with the ringbuffers.
          */
         stop();
         throw;
