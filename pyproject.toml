@@ -1,2 +1,2 @@
 [build-system]
-requires = ["setuptools", "wheel", "katversion", "jinja2==2.11.2", "pycparser==2.20", "pkgconfig==1.5.1", "pybind11==2.7.1"]
+requires = ["setuptools", "wheel", "katversion", "jinja2==2.11.2", "markupsafe==2.0.1", "pycparser==2.20", "pkgconfig==1.5.1", "pybind11==2.7.1"]

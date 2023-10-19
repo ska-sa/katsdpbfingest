@@ -1,8 +1,9 @@
--c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
+-d https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
 
 aiokatcp
-h5py
+h5py==3.8.0
 numpy
 spead2
+
 katsdpservices[argparse,aiomonitor] @ git+https://github.com/ska-sa/katsdpservices
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
