@@ -13,7 +13,7 @@ USER root
 WORKDIR /tmp
 ENV HDF5_VERSION=1.10.3
 ARG KATSDPDOCKERBASE_MIRROR=http://sdp-services.kat.ac.za/mirror
-RUN mirror_wget https://s3.amazonaws.com/hdf-wordpress-1/wp-content/uploads/manual/HDF5/hdf5-$HDF5_VERSION.tar.bz2 -O hdf5-$HDF5_VERSION.tar.bz2
+RUN mirror_wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-$HDF5_VERSION/src/hdf5-$HDF5_VERSION.tar.bz2 -O hdf5-$HDF5_VERSION.tar.bz2
 RUN tar -jxf hdf5-$HDF5_VERSION.tar.bz2
 WORKDIR /tmp/hdf5-$HDF5_VERSION
 RUN ./configure --prefix=/usr/local --enable-build-mode=production --enable-threadsafe \
