@@ -145,6 +145,8 @@ class _CaptureSession:
         Telescope state (optional)
     stream_name
         Name of the beamformer stream being captured
+    write_telstate
+        Whether to write TelescopeState into the output HDF5 file
     update_counters
         Called once a second with progress counters
     loop
@@ -156,6 +158,8 @@ class _CaptureSession:
         Filename of the HDF5 file written
     _telstate : :class:`katsdptelstate.TelescopeState`
         Telescope state interface, if any
+    _write_telstate : :class:`bool`
+        Whether to write TelescopeState into the output HDF5 file
     _loop : :class:`asyncio.AbstractEventLoop`
         Event loop passed to the constructor
     _session : :class:`katsdpbfingest._bf_ingest.Session`
@@ -164,33 +168,37 @@ class _CaptureSession:
         Task for the coroutine that waits for the C++ code and finalises
     """
     def __init__(self, config: SessionConfig, telstate: katsdptelstate.TelescopeState,
-                 stream_name: str, update_counters: Callable[[ReceiverCounters], None],
+                 stream_name: str, write_telstate: bool,
+                 update_counters: Callable[[ReceiverCounters], None],
                  loop: asyncio.AbstractEventLoop) -> None:
         self._start_time = time.time()
         self._loop = loop
         self._telstate = telstate
         self.filename = config.filename
         self.stream_name = stream_name
+        self._write_telstate = write_telstate
         self.update_counters = update_counters
         self._config = config
         self._session = session_factory(config)
         self._run_future = loop.create_task(self._run())
 
     def _write_metadata(self) -> None:
-        telstate = self._telstate
-        view = utils.cbf_telstate_view(telstate, self.stream_name)
-        try:
-            sync_time = view['sync_time']
-            scale_factor_timestamp = view['scale_factor_timestamp']
-            first_timestamp = sync_time + self._session.first_timestamp / scale_factor_timestamp
-        except KeyError:
-            _logger.warn('Failed to get timestamp conversion items, so skipping metadata')
-            return
-        # self._start_time should always be earlier, except when a clock is wrong.
-        start_time = min(first_timestamp, self._start_time)
+        if self._write_telstate:
+            telstate = self._telstate
+            view = utils.cbf_telstate_view(telstate, self.stream_name)
+            try:
+                sync_time = view['sync_time']
+                scale_factor_timestamp = view['scale_factor_timestamp']
+                first_timestamp = sync_time + self._session.first_timestamp / scale_factor_timestamp
+            except KeyError:
+                _logger.warn('Failed to get timestamp conversion items, so skipping metadata')
+                return
+            # self._start_time should always be earlier, except when a clock is wrong.
+            start_time = min(first_timestamp, self._start_time)
         h5file = h5py.File(self.filename, 'r+')
         with contextlib.closing(h5file):
-            file_writer.set_telescope_state(h5file, telstate, start_timestamp=start_time)
+            if self._write_telstate:
+                file_writer.set_telescope_state(h5file, telstate, start_timestamp=start_time)
             if self.stream_name is not None:
                 data_group = h5file['/Data']
                 data_group.attrs['stream_name'] = self.stream_name
@@ -254,6 +262,7 @@ class CaptureServer:
         - affinity
         - telstate
         - stream_name
+        - write_telstate
         - stats
         - stats_int_time
         - stats_interface
@@ -299,7 +308,7 @@ class CaptureServer:
                 self._config.filename = None
             self._capture = _CaptureSession(
                 self._config, self._args.telstate, self._args.stream_name,
-                self.update_counters, self._loop)
+                self._args.write_telstate, self.update_counters, self._loop)
         return self._capture.filename
 
     async def stop_capture(self, force: bool = True) -> None:
@@ -503,6 +512,9 @@ def parse_args(args=None, namespace=None):
     parser.add_argument(
         '--stats-interface', type=str,
         help='Network interface for signal display stream')
+    parser.add_argument(
+        '--write-telstate', action='store_true',
+        help='Write TelescopeState into the HDF5 file')
     parser.add_aiomonitor_arguments()
     parser.add_argument('--port', '-p', type=int, default=2050, help='katcp host port')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address')
