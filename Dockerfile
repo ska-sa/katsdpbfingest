@@ -1,6 +1,7 @@
 ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
+ARG TAG=uvpipfocal-fix
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build:$TAG as build
 
 # Build libhdf5 from source so that the direct I/O VFD can be used.
 # The other flags are a subset of those used by debian.rules (subsetted
@@ -34,19 +35,26 @@ ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
 WORKDIR /tmp/install
 RUN /bin/echo -e '[build_ext]\nlibrary-dirs=/usr/local/lib' > setup.cfg
-RUN install_pinned.py --no-binary=h5py -r /tmp/install/requirements.txt
+# The base h5py pin is built against bundled HDF5. This image pins h5py to the
+# version currently known to build against the custom HDF5 installed above.
+RUN grep -v '^h5py==' ~/docker-base/base-requirements.txt > /tmp/install/base-requirements.txt && \
+    sed '/^[[:space:]]*-[cd][[:space:]]/d; s/^h5py$/h5py==3.8.0/' \
+        /tmp/install/requirements.txt > /tmp/install/requirements.in && \
+    uv pip compile -c /tmp/install/base-requirements.txt /tmp/install/requirements.in -o /tmp/install/requirements.lock && \
+    uv pip install --no-deps --no-binary h5py -r /tmp/install/requirements.lock && \
+    uv pip check
 
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpbfingest
 WORKDIR /tmp/install/katsdpbfingest
 RUN cp ../setup.cfg .
 RUN python ./setup.py clean
-RUN pip install --no-deps .
-RUN pip check
+RUN uv pip install --no-deps .
+RUN uv pip check
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime:$TAG
 LABEL maintainer="sdpdev+katsdpbfingest@ska.ac.za"
 
 COPY --from=build /libhdf5-install /
