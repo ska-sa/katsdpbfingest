@@ -1,6 +1,6 @@
 ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
+FROM $KATSDPDOCKERBASE_REGISTRY/base-build:focaluvpip AS build
 
 # Build libhdf5 from source so that the direct I/O VFD can be used.
 # The other flags are a subset of those used by debian.rules (subsetted
@@ -11,7 +11,7 @@ FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build as build
 USER root
 
 WORKDIR /tmp
-ENV HDF5_VERSION=1.10.3
+ENV HDF5_VERSION=1.10.5
 ARG KATSDPDOCKERBASE_MIRROR=http://sdp-services.kat.ac.za/mirror
 RUN mirror_wget https://s3.amazonaws.com/hdf-wordpress-1/wp-content/uploads/manual/HDF5/hdf5-$HDF5_VERSION.tar.bz2 -O hdf5-$HDF5_VERSION.tar.bz2
 RUN tar -jxf hdf5-$HDF5_VERSION.tar.bz2
@@ -34,19 +34,30 @@ ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
 WORKDIR /tmp/install
 RUN /bin/echo -e '[build_ext]\nlibrary-dirs=/usr/local/lib' > setup.cfg
-RUN install_pinned.py --no-binary=h5py -r /tmp/install/requirements.txt
+#RUN install_pinned.py --no-binary=h5py -r /tmp/install/requirements.txt
 
+RUN chmod -R 777 /tmp/install
+COPY requirements.txt /tmp/install/
+RUN uv pip compile /tmp/install/requirements.txt \
+      -o /tmp/install/requirements.lock && \
+    uv pip sync /tmp/install/requirements.lock \
+    --strict --no-binary h5py
+    
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpbfingest
-WORKDIR /tmp/install/katsdpbfingest
-RUN cp ../setup.cfg .
-RUN python ./setup.py clean
-RUN pip install --no-deps .
-RUN pip check
-
+#WORKDIR /tmp/install/katsdpbfingest
+#RUN cp ../setup.cfg .
+#RUN python ./setup.py clean
+#RUN pip install --no-deps .
+#RUN pip check
+RUN cd /tmp/install/katsdpbfingest && \
+    cp ../setup.cfg . && \
+    python ./setup.py clean && \
+    uv pip install --no-deps . && \
+    uv pip check
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
+FROM $KATSDPDOCKERBASE_REGISTRY/base-runtime:focaluvpip
 LABEL maintainer="sdpdev+katsdpbfingest@ska.ac.za"
 
 COPY --from=build /libhdf5-install /
