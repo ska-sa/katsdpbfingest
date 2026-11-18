@@ -8,6 +8,7 @@ import contextlib
 import socket
 import asyncio
 from unittest import mock
+from unittest import skipUnless
 from typing import List, Optional
 
 import h5py
@@ -18,7 +19,6 @@ import spead2.recv
 import spead2.send
 
 import asynctest
-from nose.tools import assert_equal, assert_true, assert_false, assert_is_none
 
 import katsdptelstate
 from katsdptelstate import endpoint
@@ -30,7 +30,7 @@ DATA_LOST = 1 << 3
 
 
 class TestSession:
-    def setup(self) -> None:
+    def setup_method(self) -> None:
         # To avoid collisions when running tests in parallel on a single host,
         # create a socket for the duration of the test and use its port as the
         # port for the test. Sockets in the same network namespace should have
@@ -40,7 +40,7 @@ class TestSession:
         self.port = self._sock.getsockname()[1]
         self.tmpdir = tempfile.mkdtemp()
 
-    def teardown(self) -> None:
+    def teardown_method(self) -> None:
         shutil.rmtree(self.tmpdir)
         self._sock.close()
 
@@ -157,12 +157,12 @@ class TestCaptureServer(asynctest.TestCase):
     async def test_manual_stop_no_data(self) -> None:
         """Manual stop before any data is received"""
         server = bf_ingest_server.CaptureServer(self.args, self.loop)
-        assert_false(server.capturing)
+        assert not server.capturing
         await server.start_capture('1122334455')
-        assert_true(server.capturing)
+        assert server.capturing
         await asyncio.sleep(0.01)
         await server.stop_capture()
-        assert_false(server.capturing)
+        assert not server.capturing
 
     async def _test_stream(self, end: bool, write: bool) -> None:
         n_heaps = 30              # number of heaps in time
@@ -315,18 +315,18 @@ class TestCaptureServer(asynctest.TestCase):
                 np.testing.assert_equal(expected, flags)
 
                 data_set = h5file['/Data']
-                assert_equal('i0_tied_array_channelised_voltage_0x', data_set.attrs['stream_name'])
-                assert_equal(self.args.channels.start, data_set.attrs['channel_offset'])
+                assert data_set.attrs['stream_name'] == 'i0_tied_array_channelised_voltage_0x'
+                assert data_set.attrs['channel_offset'] == self.args.channels.start
         else:
-            assert_is_none(filename)
+            assert filename is None
 
         # Validate the signal display stream
         rx.stop()
         heaps = list(rx)
         # Note: would need updating if n_heaps is not a multiple of heaps_per_stats
-        assert_equal(n_heaps // self.heaps_per_stats + 2, len(heaps))
-        assert_true(heaps[0].is_start_of_stream())
-        assert_true(heaps[-1].is_end_of_stream())
+        assert len(heaps) == n_heaps // self.heaps_per_stats + 2
+        assert heaps[0].is_start_of_stream()
+        assert heaps[-1].is_end_of_stream()
         ig = spead2.send.ItemGroup()
         spectrum = 0
         spectra_per_stats = self.heaps_per_stats * self.spectra_per_heap
@@ -337,10 +337,10 @@ class TestCaptureServer(asynctest.TestCase):
             rx_timestamp = updated['sd_timestamp'].value
 
             # Check types and shapes
-            assert_equal((len(self.args.channels), 2, 2), rx_data.shape)
-            assert_equal(np.float32, rx_data.dtype)
-            assert_equal((len(self.args.channels), 2), rx_flags.shape)
-            assert_equal(np.uint8, rx_flags.dtype)
+            assert rx_data.shape == (len(self.args.channels), 2, 2)
+            assert rx_data.dtype == np.float32
+            assert rx_flags.shape == (len(self.args.channels), 2)
+            assert rx_flags.dtype == np.uint8
             np.testing.assert_equal(0, rx_data[..., 1])  # Should be real only
 
             rx_power = rx_data[:, 0, 0]
@@ -375,6 +375,14 @@ class TestCaptureServer(asynctest.TestCase):
 
     async def test_stream_end(self) -> None:
         """Stream ends with an end-of-stream"""
+        await self._test_stream(True, True)
+
+    # The Docker build uses the same custom HDF5 for h5py and bfingest.
+    # Generic CI environments may have HDF5 builds without the direct VFD.
+    @skipUnless(h5py.h5fd.DIRECT >= 0, 'HDF5 was built without the direct VFD')
+    async def test_stream_direct_io(self) -> None:
+        """Direct I/O preserves captured data, timestamps, flags and statistics."""
+        self.args.direct_io = True
         await self._test_stream(True, True)
 
     async def test_stream_no_end(self) -> None:

@@ -18,7 +18,7 @@ except ImportError:
     pybind11_include = ''
 
 
-tests_require = ['nose', 'spead2>=3.0.1', 'asynctest']
+tests_require = ['pytest', 'pytest-cov', 'spead2>=3.0.1', 'asynctest']
 
 
 # Hack: this is copied and edited from spead2, so that we can run configure

@@ -1,4 +1,4 @@
--r https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/uvpipjammy/docker-base-build/base-requirements.txt
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/uvpipjammy/docker-base-build/base-requirements.txt
 
 aiokatcp
 h5py
