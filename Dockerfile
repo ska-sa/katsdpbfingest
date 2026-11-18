@@ -1,6 +1,6 @@
 ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/base-build:focaluvpip AS build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build AS build
 
 # Build libhdf5 from source so that the direct I/O VFD can be used.
 # The other flags are a subset of those used by debian.rules (subsetted
@@ -30,34 +30,35 @@ USER kat
 # Install dependencies. We need to set library-dirs so that the new libhdf5
 # will be found. We must avoid using the h5py wheel, because it will contain
 # its own hdf5 libraries while we want to link to the system ones.
-ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+
+# Activate the base image virtualenv and make uv available
+ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
 WORKDIR /tmp/install
 RUN /bin/echo -e '[build_ext]\nlibrary-dirs=/usr/local/lib' > setup.cfg
-#RUN install_pinned.py --no-binary=h5py -r /tmp/install/requirements.txt
 
 RUN chmod -R 777 /tmp/install
 COPY requirements.txt /tmp/install/
+# The --no-binary h5py tells uv to build h5py from source rather than using
+# a pre-built wheel, which is necessary to link against a
+# specific HDF5 library version installed on the system.
 RUN uv pip compile /tmp/install/requirements.txt \
-      -o /tmp/install/requirements.lock && \
-    uv pip sync /tmp/install/requirements.lock \
-    --strict --no-binary h5py
+        -c /home/kat/docker-base/base-requirements.lock \
+        --no-binary h5py \
+        -o /tmp/install/requirements.lock && \
+    uv pip install --no-deps -r /tmp/install/requirements.lock && \
+    uv pip check
     
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpbfingest
-#WORKDIR /tmp/install/katsdpbfingest
-#RUN cp ../setup.cfg .
-#RUN python ./setup.py clean
-#RUN pip install --no-deps .
-#RUN pip check
-RUN cd /tmp/install/katsdpbfingest && \
-    cp ../setup.cfg . && \
-    python ./setup.py clean && \
+WORKDIR /tmp/install/katsdpbfingest
+
+RUN cp ../setup.cfg . && \
     uv pip install --no-deps . && \
     uv pip check
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/base-runtime:focaluvpip
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
 LABEL maintainer="sdpdev+katsdpbfingest@ska.ac.za"
 
 COPY --from=build /libhdf5-install /
